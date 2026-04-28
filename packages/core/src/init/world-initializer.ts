@@ -30,6 +30,12 @@ import {
   Pressed,
 } from '../input/index.js';
 import { InputSystem } from '../input/index.js';
+import {
+  XRQuadLayer,
+  XRCylinderLayer,
+  XRLayerState,
+  XRLayerSystem,
+} from '../layers/index.js';
 import { LevelTag, LevelRoot } from '../level/index.js';
 import { LevelSystem } from '../level/index.js';
 import { LocomotionSystem, TurningMethod } from '../locomotion/index.js';
@@ -476,6 +482,7 @@ function registerFeatureSystems(
   const sceneUnderstandingEnabled = !!sceneUnderstanding;
   const environmentRaycastEnabled = !!config.features.environmentRaycast;
   const cameraEnabled = !!config.features.camera;
+
   const spatialUI = config.features.spatialUI as
     | boolean
     | {
@@ -557,6 +564,15 @@ function registerFeatureSystems(
   // Camera system for video streaming
   if (cameraEnabled) {
     world.registerComponent(CameraSource).registerSystem(CameraSystem);
+  }
+
+  // WebXR composition layers (quad/cylinder)
+  if (config.xr.features?.layers) {
+    world
+      .registerComponent(XRQuadLayer)
+      .registerComponent(XRCylinderLayer)
+      .registerComponent(XRLayerState)
+      .registerSystem(XRLayerSystem, { priority: 1 });
   }
 
   // Spatial UI systems (Panel, ScreenSpace, Follow)
