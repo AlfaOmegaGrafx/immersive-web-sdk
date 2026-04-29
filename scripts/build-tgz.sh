@@ -30,7 +30,7 @@ PACKAGES_DIR="$BASE_DIR/packages"
 EXAMPLES_DIR="$BASE_DIR/examples"
 
 # Package build order (dependencies first)
-LEAF_PACKAGES=("glxf" "xr-input" "locomotor" "vite-plugin-gltf-optimizer" "cli" "vite-plugin-dev" "vite-plugin-metaspatial" "vite-plugin-uikitml" "create")
+LEAF_PACKAGES=("glxf" "xr-input" "locomotor" "vite-plugin-gltf-optimizer" "cli" "vite-plugin-dev" "vite-plugin-metaspatial" "vite-plugin-uikitml" "create" "reference-assets")
 ROOT_PACKAGES=("core")
 
 # Function to backup package.json
@@ -81,7 +81,12 @@ build_leaf_packages() {
         # Clean previous builds
         rm -rf lib dist build *.tgz
         
-        if pnpm run build 2>/dev/null; then
+        local build_script="build"
+        if [ "$package" = "reference-assets" ]; then
+            build_script="build:payload"
+        fi
+        
+        if pnpm run "$build_script" 2>/dev/null; then
             echo "     ✅ Build completed"
         fi
         
