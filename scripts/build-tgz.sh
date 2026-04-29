@@ -30,7 +30,7 @@ PACKAGES_DIR="$BASE_DIR/packages"
 EXAMPLES_DIR="$BASE_DIR/examples"
 
 # Package build order (dependencies first)
-LEAF_PACKAGES=("glxf" "xr-input" "locomotor" "vite-plugin-gltf-optimizer" "cli" "vite-plugin-dev" "vite-plugin-metaspatial" "vite-plugin-uikitml" "create" "reference-assets")
+LEAF_PACKAGES=("glxf" "xr-input" "locomotor" "vite-plugin-gltf-optimizer" "cli" "vite-plugin-dev" "vite-plugin-metaspatial" "vite-plugin-uikitml" "create" "reference-assets" "reference")
 ROOT_PACKAGES=("core")
 
 # Function to backup package.json
