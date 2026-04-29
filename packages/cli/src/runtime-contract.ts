@@ -47,7 +47,9 @@ export const IWSDK_RUNTIME_STATE_DIR = '.iwsdk/runtime';
 export const IWSDK_RUNTIME_LOGS_DIR = '.iwsdk/runtime/logs';
 export const IWSDK_RUNTIME_SESSION_PATH = '.iwsdk/runtime/session.json';
 export const IWSDK_RUNTIME_LAUNCH_PATH = '.iwsdk/runtime/launch.json';
-export const IWSDK_RUNTIME_STATE_SCHEMA_VERSION = 1;
+export const IWSDK_RUNTIME_STATE_SCHEMA_VERSION = 2;
+export const IWSDK_RUNTIME_BROWSER_READY_SCHEMA_VERSION = 2;
+export const INTERNAL_BROWSER_PROBE_METHOD = '__iwsdk_browser_probe';
 
 export type RuntimeIssueCause =
   | 'browser_not_ready'
@@ -75,9 +77,19 @@ export type RuntimeBrowserStatus =
 export interface RuntimeBrowserState {
   status: RuntimeBrowserStatus;
   connected: boolean;
+  commandReady: boolean;
   connectedClientCount: number;
   lastTransitionAt: string;
+  lastBridgeConnectedAt?: string;
+  lastCommandReadyAt?: string;
   lastError?: RuntimeIssueInfo;
+}
+
+export interface RuntimeBrowserProbeResult {
+  bridgeConnected: boolean;
+  commandReady: boolean;
+  waitedForBridgeMs: number;
+  browser: RuntimeBrowserState;
 }
 
 export interface RuntimeSession {
@@ -113,8 +125,38 @@ export interface WorkspaceRuntimeState {
   running: boolean;
   starting: boolean;
   browserConnected: boolean;
+  browserCommandReady: boolean;
   session: RuntimeSession | null;
   launch: LaunchMetadata | null;
+}
+
+type RuntimeBrowserStatusSession = Pick<RuntimeSession, 'schemaVersion' | 'browser'>;
+
+export function hasRuntimeBrowserCommandReadyContract(
+  session: RuntimeBrowserStatusSession | null | undefined,
+): boolean {
+  if (!session?.browser) {
+    return false;
+  }
+
+  return (
+    session.schemaVersion >= IWSDK_RUNTIME_BROWSER_READY_SCHEMA_VERSION ||
+    typeof session.browser.commandReady === 'boolean'
+  );
+}
+
+export function isRuntimeBrowserCommandReady(
+  session: RuntimeBrowserStatusSession | null | undefined,
+): boolean {
+  if (!session?.browser) {
+    return false;
+  }
+
+  if (!hasRuntimeBrowserCommandReadyContract(session)) {
+    return session.browser.connected;
+  }
+
+  return session.browser.commandReady === true;
 }
 
 export const SUPPORTED_AI_TOOLS: AiTool[] = [

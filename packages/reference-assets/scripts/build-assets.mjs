@@ -90,7 +90,7 @@ async function main() {
     typeof embeddings.model?.archiveSize !== 'number'
   ) {
     throw new Error(
-      'data/embeddings.json is missing archive-backed model metadata. Re-run the ingest pipeline.',
+      'data/embeddings.json is missing pinned model metadata. Re-run the ingest pipeline.',
     );
   }
 

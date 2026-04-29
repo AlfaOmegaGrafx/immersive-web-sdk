@@ -83,11 +83,15 @@ function createMockDevice() {
 // Helper to flush all pending promises
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function getParsedSentMessages(instance: MockWebSocket): Record<string, unknown>[] {
+function getParsedSentMessages(
+  instance: MockWebSocket,
+): Record<string, unknown>[] {
   return instance.getSentMessages().map((message) => JSON.parse(message));
 }
 
-function getRuntimeResponses(instance: MockWebSocket): Record<string, unknown>[] {
+function getRuntimeResponses(
+  instance: MockWebSocket,
+): Record<string, unknown>[] {
   return getParsedSentMessages(instance).filter(
     (message) => message.type !== 'iwsdk_browser_hello',
   );
@@ -465,7 +469,9 @@ describe('MCPWebSocketClient', () => {
 
       // Wait for async message handling to complete and response to be sent
       await vi.waitFor(() => {
-        expect(getRuntimeResponses(mockWebSocketInstance!).length).toBeGreaterThan(0);
+        expect(
+          getRuntimeResponses(mockWebSocketInstance!).length,
+        ).toBeGreaterThan(0);
       });
 
       const response = getRuntimeResponses(mockWebSocketInstance!)[0];
@@ -492,7 +498,9 @@ describe('MCPWebSocketClient', () => {
 
       // Wait for async message handling to complete and response to be sent
       await vi.waitFor(() => {
-        expect(getRuntimeResponses(mockWebSocketInstance!).length).toBeGreaterThan(0);
+        expect(
+          getRuntimeResponses(mockWebSocketInstance!).length,
+        ).toBeGreaterThan(0);
       });
 
       const response = getRuntimeResponses(mockWebSocketInstance!)[0];
@@ -699,7 +707,9 @@ describe('MCPWebSocketClient', () => {
       });
 
       await vi.waitFor(() => {
-        expect(getRuntimeResponses(mockWebSocketInstance!).length).toBeGreaterThan(0);
+        expect(
+          getRuntimeResponses(mockWebSocketInstance!).length,
+        ).toBeGreaterThan(0);
       });
 
       const response = getRuntimeResponses(mockWebSocketInstance!)[0];
@@ -725,7 +735,9 @@ describe('MCPWebSocketClient', () => {
       });
 
       await vi.waitFor(() => {
-        expect(getRuntimeResponses(mockWebSocketInstance!).length).toBeGreaterThan(0);
+        expect(
+          getRuntimeResponses(mockWebSocketInstance!).length,
+        ).toBeGreaterThan(0);
       });
 
       const response = getRuntimeResponses(mockWebSocketInstance!)[0];
@@ -753,7 +765,9 @@ describe('MCPWebSocketClient', () => {
       });
 
       await vi.waitFor(() => {
-        expect(getRuntimeResponses(mockWebSocketInstance!).length).toBeGreaterThan(0);
+        expect(
+          getRuntimeResponses(mockWebSocketInstance!).length,
+        ).toBeGreaterThan(0);
       });
 
       const response = getRuntimeResponses(mockWebSocketInstance!)[0];

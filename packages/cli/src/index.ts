@@ -6,9 +6,18 @@
  */
 
 import { parseArgv } from './argv.js';
-import { createFailure, isCliFailure, isCliRawOutput, writeJson } from './cli-results.js';
+import {
+  createFailure,
+  isCliFailure,
+  isCliRawOutput,
+  writeJson,
+} from './cli-results.js';
 import type { CliCommandResult, CliIo, ResolvedCliIo } from './cli-types.js';
-import { handleAdapterPrune, handleAdapterStatus, handleAdapterSync } from './commands/adapter.js';
+import {
+  handleAdapterPrune,
+  handleAdapterStatus,
+  handleAdapterSync,
+} from './commands/adapter.js';
 import {
   handleDevDown,
   handleDevLogs,
@@ -18,12 +27,27 @@ import {
   handleDevUp,
 } from './commands/dev.js';
 import { handleMcpInspect, handleMcpStdio } from './commands/mcp.js';
+import {
+  handleReferenceInspect,
+  handleReferenceQuery,
+  handleReferenceStatus,
+  handleReferenceWarmup,
+} from './commands/reference.js';
 import { handleRuntimeOperation } from './commands/runtime.js';
 import { handleStatus } from './commands/status.js';
-import { buildMcpInspectHelp, buildRuntimeCommandHelp, usageLines } from './help.js';
-import { RuntimeCommandExecutionError } from './runtime-transport.js';
+import {
+  buildMcpInspectHelp,
+  buildReferenceCommandHelp,
+  buildRuntimeCommandHelp,
+  usageLines,
+} from './help.js';
+import {
+  RuntimeCommandExecutionError,
+  sendRuntimeCommand,
+} from './runtime-transport.js';
 
 export type { CliIo } from './cli-types.js';
+export { RuntimeCommandExecutionError, sendRuntimeCommand };
 
 export async function runCli(argv: string[], io: CliIo = {}): Promise<number> {
   const stdout = io.stdout ?? process.stdout;
@@ -47,6 +71,11 @@ export async function runCli(argv: string[], io: CliIo = {}): Promise<number> {
         return 0;
       }
 
+      if (command === 'reference') {
+        stdout.write(`${buildReferenceCommandHelp(subcommand).join('\n')}\n`);
+        return 0;
+      }
+
       if (
         (command === 'xr' ||
           command === 'browser' ||
@@ -54,7 +83,9 @@ export async function runCli(argv: string[], io: CliIo = {}): Promise<number> {
           command === 'ecs') &&
         subcommand
       ) {
-        stdout.write(`${buildRuntimeCommandHelp(command, subcommand).join('\n')}\n`);
+        stdout.write(
+          `${buildRuntimeCommandHelp(command, subcommand).join('\n')}\n`,
+        );
         return 0;
       }
 
@@ -92,6 +123,25 @@ export async function runCli(argv: string[], io: CliIo = {}): Promise<number> {
           result = await handleAdapterStatus(parsed.options, context);
         } else {
           throw new Error('Usage: iwsdk adapter sync|status|prune');
+        }
+        break;
+      case 'reference':
+        if (subcommand === 'status') {
+          result = await handleReferenceStatus(parsed.options, context);
+        } else if (subcommand === 'warmup') {
+          result = await handleReferenceWarmup(parsed.options, context);
+        } else if (subcommand === 'inspect') {
+          result = await handleReferenceInspect(parsed.options, context);
+        } else if (subcommand) {
+          result = await handleReferenceQuery(
+            subcommand,
+            parsed.options,
+            context,
+          );
+        } else {
+          throw new Error(
+            'Usage: iwsdk reference status|warmup|inspect|search|relationship|api|file|components|systems|dependents|examples',
+          );
         }
         break;
       case 'mcp':

@@ -298,7 +298,7 @@ class IngestionPipeline {
         '  2. pnpm --filter @iwsdk/reference-assets run build:model',
       );
       console.error(
-        '  3. Warm a fresh runtime cache with IWSDK_REFERENCE_MODEL_URL=<url> iwsdk reference warmup',
+        '  3. Warm a fresh runtime cache with iwsdk reference warmup',
       );
       console.error('');
     } catch (error) {

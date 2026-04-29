@@ -8,6 +8,8 @@
 import { existsSync } from 'fs';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import path from 'path';
+import mcpSurfaceMarkers from './mcp-surface-markers.json';
+import { getReferenceEntrypoint } from './reference-runtime.js';
 import {
   MCP_CONFIG_TARGETS,
   SUPPORTED_AI_TOOLS,
@@ -42,15 +44,31 @@ export interface PruneMcpAdaptersOptions {
   weCreatedFile?: boolean;
 }
 
-const DEFAULT_MCP_SERVER_NAME = 'iwsdk';
-const DEFAULT_MCP_SERVER_ARGS = ['mcp', 'stdio'];
-const OPTIONAL_MCP_SERVER_NAMES = ['iwsdk-rag-local', 'hzdb'] as const;
-const LEGACY_MCP_SERVER_NAMES = ['iwsdk-dev-mcp'] as const;
-const ALL_MANAGED_MCP_SERVER_NAMES = [
+type McpSurfaceMarkers = {
+  runtimeServerName: string;
+  optionalServerNames: string[];
+  legacyServerNames: string[];
+  legacyArgTokens: string[];
+};
+
+const MCP_SURFACE_MARKERS = mcpSurfaceMarkers as McpSurfaceMarkers;
+
+export const DEFAULT_MCP_SERVER_NAME = MCP_SURFACE_MARKERS.runtimeServerName;
+export const DEFAULT_MCP_SERVER_ARGS = ['mcp', 'stdio'] as const;
+export const OPTIONAL_MCP_SERVER_NAMES = [
+  ...MCP_SURFACE_MARKERS.optionalServerNames,
+] as readonly string[];
+export const LEGACY_MCP_SERVER_NAMES = [
+  ...MCP_SURFACE_MARKERS.legacyServerNames,
+] as readonly string[];
+export const LEGACY_MCP_ARG_TOKENS = [
+  ...MCP_SURFACE_MARKERS.legacyArgTokens,
+] as readonly string[];
+export const ALL_MANAGED_MCP_SERVER_NAMES = [
   DEFAULT_MCP_SERVER_NAME,
   ...OPTIONAL_MCP_SERVER_NAMES,
   ...LEGACY_MCP_SERVER_NAMES,
-] as const;
+] as readonly string[];
 const TOML_BLOCK_START = '# --- IWER managed (do not edit) ---';
 const TOML_BLOCK_END = '# --- end IWER managed ---';
 
@@ -81,19 +99,27 @@ function getCliEntrypoint(workspaceRoot: string): string {
   );
 }
 
-function getRagMcpEntrypoint(workspaceRoot: string): string {
-  return path.join(
-    workspaceRoot,
-    'node_modules',
-    '@felixtz',
-    'iwsdk-rag-mcp',
-    'dist',
-    'index.js',
+export function hasManagedMcpServerReference(
+  content: string,
+  serverName: string,
+): boolean {
+  return (
+    content.includes(`"${serverName}"`) ||
+    content.includes(`[mcp_servers.${serverName}]`)
   );
 }
 
+export function hasManagedMcpArgToken(
+  content: string,
+  argToken: string,
+): boolean {
+  return content.includes(`"${argToken}"`);
+}
+
 function hasHzdbInstalled(workspaceRoot: string): boolean {
-  return existsSync(path.join(workspaceRoot, 'node_modules', '@meta-quest', 'hzdb'));
+  return existsSync(
+    path.join(workspaceRoot, 'node_modules', '@meta-quest', 'hzdb'),
+  );
 }
 
 export function getManagedMcpServerRegistry({
@@ -106,7 +132,10 @@ export function getManagedMcpServerRegistry({
   args?: string[];
 } = {}): ManagedMcpServerRegistry {
   const normalizedWorkspaceRoot = normalizeWorkspaceRoot(workspaceRoot);
-  const resolvedArgs = args ?? [getCliEntrypoint(normalizedWorkspaceRoot), ...DEFAULT_MCP_SERVER_ARGS];
+  const resolvedArgs = args ?? [
+    getCliEntrypoint(normalizedWorkspaceRoot),
+    ...DEFAULT_MCP_SERVER_ARGS,
+  ];
   const entries: StableMcpEntryMap = {
     [DEFAULT_MCP_SERVER_NAME]: {
       command,
@@ -114,11 +143,11 @@ export function getManagedMcpServerRegistry({
     },
   };
 
-  const ragEntrypoint = getRagMcpEntrypoint(normalizedWorkspaceRoot);
-  if (existsSync(ragEntrypoint)) {
-    entries['iwsdk-rag-local'] = {
+  const referenceEntrypoint = getReferenceEntrypoint(normalizedWorkspaceRoot);
+  if (existsSync(referenceEntrypoint)) {
+    entries['iwsdk-reference'] = {
       command: 'node',
-      args: [ragEntrypoint],
+      args: [referenceEntrypoint],
     };
   }
 
@@ -228,7 +257,10 @@ export async function unmergeJsonConfig(
   await writeFile(filePath, `${JSON.stringify(existing, null, 2)}\n`);
 }
 
-function stripTomlServerSections(content: string, serverNames: string[]): string {
+function stripTomlServerSections(
+  content: string,
+  serverNames: string[],
+): string {
   const managedNames = new Set(serverNames);
   const lines = content.split('\n');
   const result: string[] = [];
@@ -271,10 +303,9 @@ export async function mergeTomlConfig(
   const startIdx = existing.indexOf(TOML_BLOCK_START);
   const endIdx = existing.indexOf(TOML_BLOCK_END);
   if (startIdx !== -1 && endIdx !== -1 && startIdx < endIdx) {
-    existing =
-      `${existing.slice(0, startIdx).trimEnd()}\n${existing
-        .slice(endIdx + TOML_BLOCK_END.length)
-        .trimStart()}`;
+    existing = `${existing.slice(0, startIdx).trimEnd()}\n${existing
+      .slice(endIdx + TOML_BLOCK_END.length)
+      .trimStart()}`;
     existing = existing.trim();
   }
   if (managedKeys?.length) {
@@ -332,10 +363,9 @@ export async function unmergeTomlConfig(
     return;
   }
 
-  const cleaned =
-    `${existing.slice(0, startIdx).trimEnd()}\n${existing
-      .slice(endIdx + TOML_BLOCK_END.length)
-      .trimStart()}`;
+  const cleaned = `${existing.slice(0, startIdx).trimEnd()}\n${existing
+    .slice(endIdx + TOML_BLOCK_END.length)
+    .trimStart()}`;
   const result = serverKeys?.length
     ? stripTomlServerSections(cleaned, serverKeys)
     : cleaned.trim();
@@ -408,7 +438,12 @@ export async function pruneMcpAdapters({
     const filePath = path.join(normalizedWorkspaceRoot, target.file);
     if (target.format === 'json') {
       writes.push(
-        unmergeJsonConfig(filePath, serverKeys, target.jsonKey ?? 'mcpServers', weCreatedFile),
+        unmergeJsonConfig(
+          filePath,
+          serverKeys,
+          target.jsonKey ?? 'mcpServers',
+          weCreatedFile,
+        ),
       );
     } else {
       writes.push(unmergeTomlConfig(filePath, weCreatedFile, serverKeys));

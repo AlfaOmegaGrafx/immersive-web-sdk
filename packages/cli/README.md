@@ -7,5 +7,6 @@ It owns:
 
 - dev server lifecycle commands
 - adapter sync and status
+- explicit reference status and warmup commands
 - runtime-resolved MCP stdio access
 - direct runtime control commands

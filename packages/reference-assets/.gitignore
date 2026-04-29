@@ -13,3 +13,6 @@ dist-tools/
 
 # Packaged CDN output
 dist/
+
+# Generated model packaging output
+model-dist/

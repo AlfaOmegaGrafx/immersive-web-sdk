@@ -17,6 +17,7 @@ import type {
   ResolvedCliIo,
 } from '../cli-types.js';
 import {
+  isRuntimeBrowserCommandReady,
   RUNTIME_OPERATIONS,
   getRuntimeOperationByCliPath,
   type RuntimeSession,
@@ -40,15 +41,20 @@ function isScreenshotResult(
   return isRecord(value) && typeof value.imageData === 'string';
 }
 
-function withBrowserStatus(result: unknown, session: RuntimeSession): Record<string, unknown> {
+function withBrowserStatus(
+  result: unknown,
+  session: RuntimeSession,
+): Record<string, unknown> {
   const browser = session.browser ?? null;
   const browserConnected = Boolean(session.browser?.connected);
+  const browserCommandReady = isRuntimeBrowserCommandReady(session);
 
   if (isRecord(result)) {
     return {
       ...result,
       browser,
       browserConnected,
+      browserCommandReady,
     };
   }
 
@@ -56,6 +62,7 @@ function withBrowserStatus(result: unknown, session: RuntimeSession): Record<str
     value: result,
     browser,
     browserConnected,
+    browserCommandReady,
   };
 }
 
@@ -77,7 +84,9 @@ export async function handleRuntimeOperation(
   options: CliOptions,
   io: ResolvedCliIo,
 ): Promise<CliSuccess<unknown> | CliRawOutput> {
-  const operation = action ? getRuntimeOperationByCliPath(domain, action) : undefined;
+  const operation = action
+    ? getRuntimeOperationByCliPath(domain, action)
+    : undefined;
   if (!operation) {
     const available = RUNTIME_OPERATIONS.filter(
       (entry) => entry.domain === domain,
@@ -89,7 +98,8 @@ export async function handleRuntimeOperation(
 
   const workspaceRoot = await resolveWorkspaceRoot({
     cwd: io.cwd,
-    workspace: typeof options.workspace === 'string' ? options.workspace : undefined,
+    workspace:
+      typeof options.workspace === 'string' ? options.workspace : undefined,
     requireRunning: true,
   });
   const session = await getRuntimeSession(workspaceRoot);
@@ -104,20 +114,27 @@ export async function handleRuntimeOperation(
       typeof options.inputJson === 'string'
         ? safeJsonParse(options.inputJson, '--input-json')
         : {},
-    timeoutMs: parseIntegerOption(options.timeout, '--timeout', DEFAULT_TIMEOUT_MS),
+    timeoutMs: parseIntegerOption(
+      options.timeout,
+      '--timeout',
+      DEFAULT_TIMEOUT_MS,
+    ),
     runtimeSession: session,
   });
 
   const result =
     operation.mcpName === 'xr_get_session_status'
       ? withBrowserStatus(rawResult.result ?? rawResult, session)
-      : rawResult.result ?? rawResult;
+      : (rawResult.result ?? rawResult);
 
   if (options.raw) {
     return createRawOutput(result);
   }
 
-  if (operation.mcpName === 'browser_screenshot' && isScreenshotResult(result)) {
+  if (
+    operation.mcpName === 'browser_screenshot' &&
+    isScreenshotResult(result)
+  ) {
     const screenshotPath = await saveScreenshot(result, options.outputFile);
     return createSuccess({
       workspaceRoot,

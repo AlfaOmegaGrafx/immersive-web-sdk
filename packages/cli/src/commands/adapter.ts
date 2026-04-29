@@ -15,8 +15,22 @@ import type {
   CliSuccess,
   ResolvedCliIo,
 } from '../cli-types.js';
-import { MCP_CONFIG_TARGETS, SUPPORTED_AI_TOOLS, type AiTool } from '../runtime-contract.js';
-import { pruneMcpAdapters, syncMcpAdapters } from '../mcp-adapters.js';
+import {
+  ALL_MANAGED_MCP_SERVER_NAMES,
+  DEFAULT_MCP_SERVER_ARGS,
+  DEFAULT_MCP_SERVER_NAME,
+  LEGACY_MCP_ARG_TOKENS,
+  LEGACY_MCP_SERVER_NAMES,
+  hasManagedMcpArgToken,
+  hasManagedMcpServerReference,
+  pruneMcpAdapters,
+  syncMcpAdapters,
+} from '../mcp-adapters.js';
+import {
+  MCP_CONFIG_TARGETS,
+  SUPPORTED_AI_TOOLS,
+  type AiTool,
+} from '../runtime-contract.js';
 import { getRuntimeSession, resolveWorkspaceRoot } from '../runtime-state.js';
 
 export interface AdapterStatusEntry {
@@ -26,18 +40,86 @@ export interface AdapterStatusEntry {
   status: 'configured' | 'missing' | 'stale';
 }
 
+type JsonObject = Record<string, unknown>;
+
+function isRecord(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function hasCanonicalManagedAdapterEntry(content: string): boolean {
   return (
     (content.includes('@iwsdk/cli') ||
-      content.includes('"iwsdk"') ||
-      content.includes('command = "iwsdk"')) &&
-    content.includes('"mcp"') &&
-    content.includes('"stdio"')
+      hasManagedMcpServerReference(content, DEFAULT_MCP_SERVER_NAME)) &&
+    DEFAULT_MCP_SERVER_ARGS.every((arg) => hasManagedMcpArgToken(content, arg))
   );
 }
 
+function extractManagedTomlSections(content: string): string {
+  const managedNames = new Set(ALL_MANAGED_MCP_SERVER_NAMES);
+  const lines = content.split('\n');
+  const result: string[] = [];
+  let currentSectionManaged = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const sectionMatch = trimmed.match(/^\[mcp_servers\.([^\]]+)\]$/);
+    if (sectionMatch) {
+      currentSectionManaged = managedNames.has(sectionMatch[1]);
+      if (currentSectionManaged) {
+        result.push(line);
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith('[')) {
+      currentSectionManaged = false;
+    }
+
+    if (currentSectionManaged) {
+      result.push(line);
+    }
+  }
+
+  return result.join('\n');
+}
+
+function getManagedAdapterContent(
+  content: string,
+  target: (typeof MCP_CONFIG_TARGETS)[AiTool],
+): string | null {
+  if (target.format === 'toml') {
+    return extractManagedTomlSections(content);
+  }
+
+  try {
+    const parsed = JSON.parse(content);
+    if (!isRecord(parsed)) {
+      return null;
+    }
+
+    const sectionValue = parsed[target.jsonKey ?? 'mcpServers'];
+    if (!isRecord(sectionValue)) {
+      return null;
+    }
+
+    const managedEntries = Object.fromEntries(
+      Object.entries(sectionValue).filter(([name]) =>
+        ALL_MANAGED_MCP_SERVER_NAMES.includes(name),
+      ),
+    );
+    return JSON.stringify(managedEntries);
+  } catch {
+    return null;
+  }
+}
+
 function hasLegacyManagedAdapterEntry(content: string): boolean {
-  return content.includes('iwsdk-dev-mcp') || content.includes('--port');
+  return (
+    LEGACY_MCP_SERVER_NAMES.some((name) =>
+      hasManagedMcpServerReference(content, name),
+    ) ||
+    LEGACY_MCP_ARG_TOKENS.some((arg) => hasManagedMcpArgToken(content, arg))
+  );
 }
 
 function isAiTool(value: string): value is AiTool {
@@ -63,13 +145,15 @@ export async function readAdapterStatus(
     }
 
     const content = await readFile(filePath, 'utf8');
+    const managedContent = getManagedAdapterContent(content, target);
     status.push({
       tool,
       file: target.file,
       exists: true,
       status:
-        hasCanonicalManagedAdapterEntry(content) &&
-        !hasLegacyManagedAdapterEntry(content)
+        managedContent !== null &&
+        hasCanonicalManagedAdapterEntry(managedContent) &&
+        !hasLegacyManagedAdapterEntry(managedContent)
           ? 'configured'
           : 'stale',
     });
@@ -97,8 +181,8 @@ async function resolveAdapterTools(
   }
 
   const session = await getRuntimeSession(workspaceRoot);
-  if (session?.aiTools?.length) {
-    return session.aiTools;
+  if (session && Array.isArray(session.aiTools)) {
+    return session.aiTools.filter((tool): tool is AiTool => isAiTool(tool));
   }
 
   return [...SUPPORTED_AI_TOOLS];

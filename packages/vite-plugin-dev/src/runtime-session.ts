@@ -6,7 +6,7 @@
  */
 
 import { existsSync, realpathSync } from 'fs';
-import { mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises';
 import path from 'path';
 import {
   IWSDK_RUNTIME_SESSION_PATH,
@@ -27,6 +27,22 @@ interface RegisterRuntimeSessionInput {
   browser?: RuntimeBrowserState;
 }
 
+function isTraceEnabled(): boolean {
+  return process.env.IWSDK_RUNTIME_TRACE === '1';
+}
+
+function traceRuntimeSession(
+  event: string,
+  details: Record<string, unknown> = {},
+): void {
+  if (!isTraceEnabled()) {
+    return;
+  }
+  console.error(
+    `[IWSDK-RUNTIME-TRACE][session] ${event} ${JSON.stringify(details)}`,
+  );
+}
+
 function normalizeWorkspaceRoot(workspaceRoot: string): string {
   const resolved = path.resolve(workspaceRoot);
   try {
@@ -37,10 +53,37 @@ function normalizeWorkspaceRoot(workspaceRoot: string): string {
 }
 
 function getRuntimeSessionFilePath(workspaceRoot: string): string {
-  return path.join(normalizeWorkspaceRoot(workspaceRoot), IWSDK_RUNTIME_SESSION_PATH);
+  return path.join(
+    normalizeWorkspaceRoot(workspaceRoot),
+    IWSDK_RUNTIME_SESSION_PATH,
+  );
 }
 
-async function readRuntimeSession(filePath: string): Promise<RuntimeSession | null> {
+const sessionMutationQueues = new Map<string, Promise<unknown>>();
+
+async function enqueueSessionMutation<T>(
+  workspaceRoot: string,
+  mutate: (normalizedWorkspaceRoot: string) => Promise<T>,
+): Promise<T> {
+  const normalizedWorkspaceRoot = normalizeWorkspaceRoot(workspaceRoot);
+  const previous =
+    sessionMutationQueues.get(normalizedWorkspaceRoot) ?? Promise.resolve();
+  const next = previous
+    .catch(() => {})
+    .then(() => mutate(normalizedWorkspaceRoot));
+  sessionMutationQueues.set(normalizedWorkspaceRoot, next);
+  try {
+    return await next;
+  } finally {
+    if (sessionMutationQueues.get(normalizedWorkspaceRoot) === next) {
+      sessionMutationQueues.delete(normalizedWorkspaceRoot);
+    }
+  }
+}
+
+async function readRuntimeSession(
+  filePath: string,
+): Promise<RuntimeSession | null> {
   try {
     const raw = await readFile(filePath, 'utf8');
     return JSON.parse(raw) as RuntimeSession;
@@ -55,51 +98,93 @@ async function writeRuntimeSession(
 ): Promise<RuntimeSession> {
   const filePath = getRuntimeSessionFilePath(workspaceRoot);
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await writeFile(tempPath, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+    await rename(tempPath, filePath);
+  } finally {
+    await rm(tempPath, { force: true }).catch(() => {});
+  }
   return session;
 }
 
 export async function registerRuntimeSession(
   input: RegisterRuntimeSessionInput,
 ): Promise<RuntimeSession> {
-  const workspaceRoot = normalizeWorkspaceRoot(input.workspaceRoot);
-  const existing = await readRuntimeSession(getRuntimeSessionFilePath(workspaceRoot));
-  const now = new Date().toISOString();
-  const session: RuntimeSession = {
-    schemaVersion: IWSDK_RUNTIME_STATE_SCHEMA_VERSION,
-    sessionId: input.sessionId,
-    workspaceRoot,
-    pid: input.pid,
-    port: input.port,
-    localUrl: input.localUrl,
-    networkUrls: input.networkUrls ?? [],
-    aiMode: input.aiMode,
-    aiTools: input.aiTools ?? [],
-    browser: input.browser ?? existing?.browser,
-    registeredAt: existing?.registeredAt ?? now,
-    updatedAt: now,
-  };
-  return writeRuntimeSession(workspaceRoot, session);
+  return enqueueSessionMutation(
+    input.workspaceRoot,
+    async (workspaceRoot): Promise<RuntimeSession> => {
+      const existing = await readRuntimeSession(
+        getRuntimeSessionFilePath(workspaceRoot),
+      );
+      const now = new Date().toISOString();
+      const session: RuntimeSession = {
+        schemaVersion: IWSDK_RUNTIME_STATE_SCHEMA_VERSION,
+        sessionId: input.sessionId,
+        workspaceRoot,
+        pid: input.pid,
+        port: input.port,
+        localUrl: input.localUrl,
+        networkUrls: input.networkUrls ?? [],
+        aiMode: input.aiMode,
+        aiTools: input.aiTools ?? [],
+        browser: input.browser ?? existing?.browser,
+        registeredAt: existing?.registeredAt ?? now,
+        updatedAt: now,
+      };
+      traceRuntimeSession('register', {
+        workspaceRoot,
+        port: input.port,
+        browserStatus: session.browser?.status ?? null,
+        bridgeConnected: session.browser?.connected ?? false,
+        commandReady: session.browser?.commandReady ?? false,
+      });
+      return writeRuntimeSession(workspaceRoot, session);
+    },
+  );
 }
 
 export async function setRuntimeSessionBrowserState(
   workspaceRoot: string,
   browser: RuntimeBrowserState,
 ): Promise<RuntimeSession | null> {
-  const normalizedWorkspaceRoot = normalizeWorkspaceRoot(workspaceRoot);
-  const existing = await readRuntimeSession(getRuntimeSessionFilePath(normalizedWorkspaceRoot));
-  if (!existing) {
-    return null;
-  }
+  return enqueueSessionMutation(
+    workspaceRoot,
+    async (normalizedWorkspaceRoot): Promise<RuntimeSession | null> => {
+      const existing = await readRuntimeSession(
+        getRuntimeSessionFilePath(normalizedWorkspaceRoot),
+      );
+      if (!existing) {
+        return null;
+      }
 
-  const session: RuntimeSession = {
-    ...existing,
-    browser,
-    updatedAt: new Date().toISOString(),
-  };
-  return writeRuntimeSession(normalizedWorkspaceRoot, session);
+      const session: RuntimeSession = {
+        ...existing,
+        browser,
+        updatedAt: new Date().toISOString(),
+      };
+      traceRuntimeSession('set_browser_state', {
+        workspaceRoot: normalizedWorkspaceRoot,
+        browserStatus: browser.status,
+        bridgeConnected: browser.connected,
+        commandReady: browser.commandReady,
+        connectedClientCount: browser.connectedClientCount,
+        lastError: browser.lastError ?? null,
+      });
+      return writeRuntimeSession(normalizedWorkspaceRoot, session);
+    },
+  );
 }
 
-export async function unregisterRuntimeSession(workspaceRoot: string): Promise<void> {
-  await rm(getRuntimeSessionFilePath(workspaceRoot), { force: true }).catch(() => {});
+export async function unregisterRuntimeSession(
+  workspaceRoot: string,
+): Promise<void> {
+  await enqueueSessionMutation(workspaceRoot, async (normalizedWorkspaceRoot) => {
+    traceRuntimeSession('unregister', {
+      workspaceRoot: normalizedWorkspaceRoot,
+    });
+    await rm(getRuntimeSessionFilePath(normalizedWorkspaceRoot), {
+      force: true,
+    }).catch(() => {});
+  });
 }

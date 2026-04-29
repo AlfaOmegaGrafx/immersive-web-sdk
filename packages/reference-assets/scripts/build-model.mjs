@@ -6,59 +6,44 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import * as tar from 'tar';
 import { fileURLToPath } from 'node:url';
+import {
+  createDeterministicModelArchive,
+  downloadPinnedModelFile,
+  REFERENCE_MODEL_FILE_SOURCES,
+  REQUIRED_MODEL_FILES,
+  sha256File,
+} from '../pinned-model.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 const outputRoot = path.join(packageRoot, 'model-dist');
-const sourceDir = path.join(packageRoot, 'model');
 const ALLOW_MISSING = process.argv.includes('--if-ready');
-const REQUIRED_MODEL_FILES = [
-  'config.json',
-  'tokenizer.json',
-  'tokenizer_config.json',
-  path.join('onnx', 'model_quantized.onnx'),
-];
 
-async function sha256File(filePath) {
-  return new Promise((resolve, reject) => {
-    const hash = createHash('sha256');
-    const stream = createReadStream(filePath);
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('error', reject);
-    stream.on('end', () => resolve(hash.digest('hex')));
-  });
-}
-
-async function validateSourceDir() {
-  try {
-    await fsp.access(sourceDir);
-  } catch {
-    if (ALLOW_MISSING) {
-      return false;
-    }
-    throw new Error(
-      'Missing model/ in @iwsdk/reference-assets. Ensure the local model snapshot is present before building model.tgz.',
+async function populateSourceDir(stagingRoot) {
+  const sourceDir = path.join(stagingRoot, 'model');
+  for (const file of REFERENCE_MODEL_FILE_SOURCES) {
+    await downloadPinnedModelFile(
+      file.sourceUrl,
+      path.join(sourceDir, file.relativePath),
     );
   }
+  return sourceDir;
+}
 
-  for (const relativePath of REQUIRED_MODEL_FILES) {
-    try {
-      await fsp.access(path.join(sourceDir, relativePath));
-    } catch {
-      if (ALLOW_MISSING) {
-        return false;
-      }
-      throw new Error(`Model source is missing ${relativePath}.`);
-    }
+async function populateUploadDir(sourceDir) {
+  const uploadDir = path.join(outputRoot, 'rag');
+  await fsp.mkdir(uploadDir, { recursive: true });
+
+  for (const file of REFERENCE_MODEL_FILE_SOURCES) {
+    const sourcePath = path.join(sourceDir, file.relativePath);
+    const uploadPath = path.join(uploadDir, path.basename(file.relativePath));
+    await fsp.copyFile(sourcePath, uploadPath);
   }
 
-  return true;
+  return uploadDir;
 }
 
 async function main() {
@@ -66,60 +51,64 @@ async function main() {
     await fsp.readFile(path.join(packageRoot, 'package.json'), 'utf8'),
   );
 
-  const ready = await validateSourceDir();
-  if (!ready) {
-    process.stdout.write(
-      'Skipping model packaging because the local model snapshot is not present yet.\n',
-    );
-    await fsp.rm(outputRoot, { recursive: true, force: true });
-    return;
-  }
-
   await fsp.rm(outputRoot, { recursive: true, force: true });
   await fsp.mkdir(outputRoot, { recursive: true });
+  const stagingRoot = path.join(outputRoot, '.staging');
 
-  const archivePath = path.join(outputRoot, 'model.tgz');
-  await tar.c(
-    {
-      cwd: packageRoot,
-      file: archivePath,
-      gzip: true,
-      portable: true,
-      noPax: true,
-      mtime: new Date(0),
-    },
-    ['model'],
-  );
+  try {
+    await fsp.rm(stagingRoot, { recursive: true, force: true });
+    const sourceDir = await populateSourceDir(stagingRoot);
 
-  const archiveStat = await fsp.stat(archivePath);
-  const archiveSha256 = await sha256File(archivePath);
-  const manifest = {
-    schemaVersion: 1,
-    referenceVersion: packageJson.version,
-    generatedAt: new Date().toISOString(),
-    model: {
-      file: 'model.tgz',
-      sha256: archiveSha256,
-      size: archiveStat.size,
-      format: 'transformers-js',
-      requiredFiles: REQUIRED_MODEL_FILES,
-    },
-  };
+    for (const relativePath of REQUIRED_MODEL_FILES) {
+      await fsp.access(path.join(sourceDir, relativePath));
+    }
 
-  await fsp.writeFile(
-    path.join(outputRoot, 'manifest.json'),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-    'utf8',
-  );
-  await fsp.writeFile(
-    path.join(outputRoot, 'model.tgz.sha256'),
-    `${archiveSha256}  model.tgz\n`,
-    'utf8',
-  );
+    await populateUploadDir(sourceDir);
 
-  process.stdout.write(
-    `Built reference model artifact in ${outputRoot} (${archiveStat.size} B model)\n`,
-  );
+    const archivePath = path.join(outputRoot, 'model.tgz');
+    await createDeterministicModelArchive(sourceDir, archivePath);
+
+    const archiveStat = await fsp.stat(archivePath);
+    const archiveSha256 = await sha256File(archivePath);
+    const manifest = {
+      schemaVersion: 1,
+      referenceVersion: packageJson.version,
+      generatedAt: new Date().toISOString(),
+      model: {
+        file: 'model.tgz',
+        sha256: archiveSha256,
+        size: archiveStat.size,
+        format: 'transformers-js',
+        requiredFiles: REQUIRED_MODEL_FILES,
+      },
+    };
+
+    await fsp.writeFile(
+      path.join(outputRoot, 'manifest.json'),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      'utf8',
+    );
+    await fsp.writeFile(
+      path.join(outputRoot, 'model.tgz.sha256'),
+      `${archiveSha256}  model.tgz\n`,
+      'utf8',
+    );
+
+    process.stdout.write(
+      `Built reference model artifact in ${outputRoot} (${archiveStat.size} B model, upload folder: rag/)\n`,
+    );
+  } catch (error) {
+    if (ALLOW_MISSING) {
+      process.stdout.write(
+        'Skipping model packaging because the pinned model files are not reachable.\n',
+      );
+      await fsp.rm(outputRoot, { recursive: true, force: true });
+      return;
+    }
+    throw error;
+  } finally {
+    await fsp.rm(stagingRoot, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 main().catch((error) => {

@@ -112,6 +112,29 @@ export async function installDependenciesFromBundle(
   }
 }
 
+function printReferenceWarmupGuidance() {
+  console.log(
+    stdoutColor.gray(
+      '  # @iwsdk/reference downloads its pinned model automatically during warmup',
+    ),
+  );
+  console.log(
+    stdoutColor.gray(
+      '  # optional for bundle/internal or unpublished corpus payloads: set IWSDK_REFERENCE_ASSETS_BASE_URL to the hosted reference-assets dist URL',
+    ),
+  );
+  console.log(
+    stdoutColor.gray(
+      '  # warmup still needs access to the baked public model file URLs unless the shared cache is already pre-warmed',
+    ),
+  );
+  console.log(
+    stdoutColor.gray(
+      '  # then run: npx iwsdk reference warmup',
+    ),
+  );
+}
+
 export function printNextSteps(
   appName: string,
   installed: boolean,
@@ -139,6 +162,7 @@ export function printNextSteps(
   if (!installed) {
     console.log(stdoutColor.gray('  npm install'));
   }
+  printReferenceWarmupGuidance();
   console.log(stdoutColor.gray(`  ${startCmd}`));
 }
 

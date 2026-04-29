@@ -66,7 +66,7 @@ export class SearchService {
       ) as EmbeddingsData;
       if (!isReferenceEmbeddingModelMetadata(data.model)) {
         throw new Error(
-          'Embeddings file is missing archive-backed model metadata.',
+          'Embeddings file is missing pinned model metadata.',
         );
       }
       model = data.model;
@@ -82,7 +82,7 @@ export class SearchService {
       ];
 
       console.error(
-        `Loaded ${this.chunks.length} chunks using model archive sha256 ${data.model.archiveSha256}`,
+        `Loaded ${this.chunks.length} chunks using pinned model sha256 ${data.model.archiveSha256}`,
       );
       console.error(`  - iwsdk: ${data.iwsdk.length} chunks`);
       console.error(`  - deps: ${data.deps.length} chunks`);

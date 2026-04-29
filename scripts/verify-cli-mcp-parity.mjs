@@ -24,14 +24,17 @@ import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { runBrowserWarmup } from './browser-warmup-utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const SOURCE_EXAMPLE = path.join(ROOT, 'examples', 'poke');
 const CLI_PATH = path.join(ROOT, 'packages', 'cli', 'dist', 'cli.js');
-const cliPackageRequire = createRequire(path.join(ROOT, 'packages', 'cli', 'package.json'));
+const cliPackageRequire = createRequire(
+  path.join(ROOT, 'packages', 'cli', 'package.json'),
+);
 const EXCLUDE_NAMES = new Set([
   'node_modules',
   'package-lock.json',
@@ -46,9 +49,12 @@ const DEFAULT_DEV_TIMEOUT_MS = 120000;
 const NUMBER_TOLERANCE = 2e-2;
 const TAB_CHANGE_WARNING = 'WARNING: Active browser tab changed';
 const INVALID_UUID = '00000000-0000-0000-0000-000000000000';
+const HARNESS_RUNTIME_ENV = { IWSDK_RUNTIME_TRACE: '1' };
+const NODE_BINARY = 'node';
 
 let normalizationWorkspaceRoots = [];
 let runtimeContract = null;
+let runtimeTransport = null;
 
 async function loadRuntimeContract() {
   if (runtimeContract) {
@@ -60,8 +66,22 @@ async function loadRuntimeContract() {
 }
 
 function getRuntimeContract() {
-  assert(runtimeContract, 'Runtime contract must be loaded after building @iwsdk/cli');
+  assert(
+    runtimeContract,
+    'Runtime contract must be loaded after building @iwsdk/cli',
+  );
   return runtimeContract;
+}
+
+async function loadRuntimeTransport() {
+  if (runtimeTransport) {
+    return runtimeTransport;
+  }
+
+  runtimeTransport = await import(
+    pathToFileURL(path.join(ROOT, 'packages', 'cli', 'dist', 'index.js')).href
+  );
+  return runtimeTransport;
 }
 
 function parseArgs(argv) {
@@ -189,12 +209,7 @@ function tolerantEqual(left, right) {
 async function runCommand(
   command,
   args,
-  {
-    cwd = ROOT,
-    env = {},
-    captureOutput = false,
-    allowFailure = false,
-  } = {},
+  { cwd = ROOT, env = {}, captureOutput = false, allowFailure = false } = {},
 ) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -241,11 +256,16 @@ async function runCommand(
   });
 }
 
-async function runCliJson(args, cwd = ROOT) {
-  const { stdout, stderr } = await runCommand(process.execPath, [CLI_PATH, ...args], {
-    captureOutput: true,
-    cwd,
-  });
+async function runCliJson(args, cwd = ROOT, options = {}) {
+  const { stdout, stderr } = await runCommand(
+    NODE_BINARY,
+    [CLI_PATH, ...args],
+    {
+      captureOutput: true,
+      cwd,
+      env: options.trace ? HARNESS_RUNTIME_ENV : {},
+    },
+  );
 
   let parsed;
   try {
@@ -259,7 +279,9 @@ async function runCliJson(args, cwd = ROOT) {
   }
 
   if (!parsed.ok) {
-    throw new Error(`CLI ${args.join(' ')} failed: ${JSON.stringify(parsed.error)}`);
+    throw new Error(
+      `CLI ${args.join(' ')} failed: ${JSON.stringify(parsed.error)}`,
+    );
   }
 
   return parsed.data;
@@ -277,7 +299,12 @@ function parseJsonOrThrow(text, label) {
   }
 }
 
-async function callCliToolOutcome(workspaceRoot, toolName, inputJson = {}) {
+async function callCliToolOutcome(
+  workspaceRoot,
+  toolName,
+  inputJson = {},
+  options = {},
+) {
   const { getRuntimeOperationByToolName } = getRuntimeContract();
   const operation = getRuntimeOperationByToolName(toolName);
   assert(operation, `No CLI mapping found for ${toolName}`);
@@ -287,16 +314,22 @@ async function callCliToolOutcome(workspaceRoot, toolName, inputJson = {}) {
     args.push('--input-json', JSON.stringify(inputJson));
   }
 
-  const { exitCode, stdout, stderr } = await runCommand(process.execPath, [CLI_PATH, ...args], {
-    captureOutput: true,
-    cwd: workspaceRoot,
-    allowFailure: true,
-  });
+  const { exitCode, stdout, stderr } = await runCommand(
+    NODE_BINARY,
+    [CLI_PATH, ...args],
+    {
+      captureOutput: true,
+      cwd: workspaceRoot,
+      allowFailure: true,
+      env: options.trace ? HARNESS_RUNTIME_ENV : {},
+    },
+  );
   const output = exitCode === 0 ? stdout : stderr || stdout;
   const parsed = parseJsonOrThrow(output, `CLI ${toolName}`);
 
   if (exitCode !== 0) {
-    const errorPayload = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : parsed;
+    const errorPayload =
+      isRecord(parsed) && isRecord(parsed.error) ? parsed.error : parsed;
     return {
       ok: false,
       error: errorPayload,
@@ -328,6 +361,65 @@ async function callCliToolOutcome(workspaceRoot, toolName, inputJson = {}) {
   };
 }
 
+async function readWorkspaceRuntimeSession(workspaceRoot) {
+  const { IWSDK_RUNTIME_SESSION_PATH } = getRuntimeContract();
+  const sessionPath = path.join(workspaceRoot, IWSDK_RUNTIME_SESSION_PATH);
+  try {
+    return parseJsonOrThrow(
+      await readFile(sessionPath, 'utf8'),
+      `runtime session ${sessionPath}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function waitForBrowserCommandReady(
+  workspaceRoot,
+  label,
+  timeoutMs = DEFAULT_DEV_TIMEOUT_MS,
+) {
+  const { INTERNAL_BROWSER_PROBE_METHOD } = getRuntimeContract();
+  const { sendRuntimeCommand } = await loadRuntimeTransport();
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+
+  while (Date.now() < deadline) {
+    try {
+      const session = await readWorkspaceRuntimeSession(workspaceRoot);
+      if (!session) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+      const remainingMs = Math.max(deadline - Date.now(), 1);
+      const response = await sendRuntimeCommand({
+        port: session.port,
+        method: INTERNAL_BROWSER_PROBE_METHOD,
+        timeoutMs: Math.min(remainingMs, 3000),
+        runtimeSession: session,
+      });
+      if (
+        isRecord(response.result) &&
+        response.result.commandReady === true
+      ) {
+        return;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  const message =
+    lastError instanceof Error ? lastError.message : String(lastError ?? '');
+  throw new Error(
+    `[${label}] browser command path did not become ready within ${timeoutMs}ms${
+      message ? ` (${message})` : ''
+    }`,
+  );
+}
+
 function tryParseJsonTextBlock(text) {
   const trimmed = text.trim();
   if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
@@ -341,7 +433,9 @@ function tryParseJsonTextBlock(text) {
 }
 
 function isTabMetadataBlock(value) {
-  return isRecord(value) && Object.keys(value).length === 1 && isRecord(value._tab);
+  return (
+    isRecord(value) && Object.keys(value).length === 1 && isRecord(value._tab)
+  );
 }
 
 function parseMcpToolContent(content) {
@@ -363,11 +457,15 @@ function parseMcpToolContent(content) {
   const primaryJson = jsonBlocks.find((block) => !isTabMetadataBlock(block));
   const tabMetadata = jsonBlocks.find((block) => isTabMetadataBlock(block));
   const inlineTabMetadata =
-    isRecord(primaryJson) && isRecord(primaryJson._tab) ? primaryJson._tab : null;
+    isRecord(primaryJson) && isRecord(primaryJson._tab)
+      ? primaryJson._tab
+      : null;
 
   return {
     result: primaryJson,
-    tab: inlineTabMetadata ?? (isTabMetadataBlock(tabMetadata) ? tabMetadata._tab : null),
+    tab:
+      inlineTabMetadata ??
+      (isTabMetadataBlock(tabMetadata) ? tabMetadata._tab : null),
     warnings,
   };
 }
@@ -392,7 +490,9 @@ async function callMcpToolOutcome(client, toolName, args) {
   }
 
   const parsed = parseMcpToolContent(response.content);
-  const payload = parsed.result ?? { message: `No JSON payload returned for ${toolName}` };
+  const payload = parsed.result ?? {
+    message: `No JSON payload returned for ${toolName}`,
+  };
 
   if (response.isError) {
     return {
@@ -430,11 +530,21 @@ function normalizeMcpError(error) {
   };
 }
 
-const RECOVERABLE_BROWSER_CAUSES = new Set(['connection_lost', 'browser_not_ready']);
+const RECOVERABLE_BROWSER_CAUSES = new Set([
+  'connection_lost',
+  'browser_not_ready',
+  'browser_relaunched',
+]);
 
 function assertImageSmoke(label, cliValue, mcpValue) {
-  assert(cliValue?.kind === 'image', `${label}: CLI did not return an image payload`);
-  assert(mcpValue?.kind === 'image', `${label}: MCP did not return an image payload`);
+  assert(
+    cliValue?.kind === 'image',
+    `${label}: CLI did not return an image payload`,
+  );
+  assert(
+    mcpValue?.kind === 'image',
+    `${label}: MCP did not return an image payload`,
+  );
   assert(
     typeof cliValue.bytes === 'number' && cliValue.bytes > 0,
     `${label}: CLI image payload was empty`,
@@ -509,12 +619,18 @@ async function prepareExampleClone(targetRoot, packageName) {
   packageJson.name = packageName;
   rewriteFileDependencies(packageJson.dependencies);
   rewriteFileDependencies(packageJson.devDependencies);
-  await writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n', 'utf8');
+  await writeFile(
+    packageJsonPath,
+    JSON.stringify(packageJson, null, 2) + '\n',
+    'utf8',
+  );
 }
 
 async function installWorkspace(workspaceRoot, label) {
   for (let attempt = 1; attempt <= DEFAULT_INSTALL_RETRIES; attempt++) {
-    console.log(`[${label}] npm install (attempt ${attempt}/${DEFAULT_INSTALL_RETRIES})`);
+    console.log(
+      `[${label}] npm install (attempt ${attempt}/${DEFAULT_INSTALL_RETRIES})`,
+    );
     try {
       await runCommand('npm', ['install'], { cwd: workspaceRoot });
       return;
@@ -532,8 +648,10 @@ async function ensureRuntimeStarted(workspaceRoot, label) {
   const data = await runCliJson(
     ['dev', 'up', '--timeout', String(DEFAULT_DEV_TIMEOUT_MS)],
     workspaceRoot,
+    { trace: true },
   );
   console.log(`[${label}] dev server ${data.action}`);
+  console.log(`[${label}] runtime log: ${data.logPath ?? 'n/a'}`);
   return data;
 }
 
@@ -557,32 +675,50 @@ async function waitFor(predicate, label, timeoutMs = 30000) {
 
 async function warmBrowser(workspaceRoot, label) {
   console.log(`[${label}] warming managed browser`);
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const outcome = await callCliToolOutcome(workspaceRoot, 'browser_screenshot');
-      if (!outcome.ok) {
-        throw new Error(JSON.stringify(outcome.error));
-      }
-      if (outcome.result?.status === 'browser_relaunched') {
-        console.log(`[${label}] browser relaunched, retrying screenshot`);
-        continue;
-      }
-      return;
-    } catch (error) {
-      if (attempt === 3) {
-        throw error;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      console.log(
-        `[${label}] screenshot warm-up failed (${message}), retrying (${attempt}/3)`,
+  await waitForBrowserCommandReady(workspaceRoot, label);
+  await runBrowserWarmup({
+    runAttempt: async () => {
+      const outcome = await callCliToolOutcome(
+        workspaceRoot,
+        'browser_screenshot',
+        {},
+        { trace: true },
       );
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-  }
-  throw new Error(`[${label}] browser did not reach a stable screenshot state`);
+      if (outcome.ok && outcome.result?.status !== 'browser_relaunched') {
+        return { kind: 'success' };
+      }
+      if (outcome.ok && outcome.result?.status === 'browser_relaunched') {
+        return { kind: 'relaunched' };
+      }
+      const normalized = normalizeCliError(outcome.error);
+      return {
+        kind: 'failure',
+        error: new Error(JSON.stringify(outcome.error)),
+        cause: normalized.cause,
+        message: normalized.message,
+      };
+    },
+    waitForCommandReady: () => waitForBrowserCommandReady(workspaceRoot, label),
+    onRelaunched: async () => {
+      console.log(
+        `[${label}] browser relaunched, waiting for fresh command readiness`,
+      );
+    },
+    onRetryableFailure: async (failureCount, attempt) => {
+      console.log(
+        `[${label}] screenshot warm-up failed (${attempt.message}), retrying (${failureCount}/3)`,
+      );
+    },
+  });
 }
 
-async function recoverCliOutcome(workspaceRoot, label, toolName, args, outcome) {
+async function recoverCliOutcome(
+  workspaceRoot,
+  label,
+  toolName,
+  args,
+  outcome,
+) {
   if (outcome.ok) {
     return outcome;
   }
@@ -628,13 +764,21 @@ const SMOKE_STEPS = [
     expectTabMetadata: true,
     after({ mcpOutcome, context }) {
       context.initialTabId = mcpOutcome.tab?.id ?? null;
-      assert(context.initialTabId, 'Initial MCP status should include tab metadata');
+      assert(
+        context.initialTabId,
+        'Initial MCP status should include tab metadata',
+      );
     },
   },
   { name: 'xr_accept_session', args: () => ({}) },
   {
     name: 'ecs_list_systems',
     args: () => ({}),
+    expectTabMetadata: true,
+  },
+  {
+    name: 'browser_get_console_logs',
+    args: () => ({ count: 10, level: ['warn', 'error'] }),
     expectTabMetadata: true,
   },
   { name: 'browser_screenshot', args: () => ({}) },
@@ -647,11 +791,15 @@ const SMOKE_STEPS = [
 ];
 
 function assertSmokeCoverage() {
-  const { RUNTIME_MCP_TOOLS, getRuntimeOperationByToolName } = getRuntimeContract();
+  const { RUNTIME_MCP_TOOLS, getRuntimeOperationByToolName } =
+    getRuntimeContract();
   const expectedNames = new Set(RUNTIME_MCP_TOOLS.map((tool) => tool.name));
 
   for (const step of SMOKE_STEPS) {
-    assert(expectedNames.has(step.name), `Unknown runtime MCP tool in smoke step ${step.name}`);
+    assert(
+      expectedNames.has(step.name),
+      `Unknown runtime MCP tool in smoke step ${step.name}`,
+    );
     assert(
       getRuntimeOperationByToolName(step.name),
       `Missing CLI mapping for smoke step ${step.name}`,
@@ -660,7 +808,9 @@ function assertSmokeCoverage() {
 }
 
 async function loadMcpSdk() {
-  const { Client } = cliPackageRequire('@modelcontextprotocol/sdk/client/index.js');
+  const { Client } = cliPackageRequire(
+    '@modelcontextprotocol/sdk/client/index.js',
+  );
   const { StdioClientTransport } = cliPackageRequire(
     '@modelcontextprotocol/sdk/client/stdio.js',
   );
@@ -673,8 +823,15 @@ async function waitForOfferedState(
   label = 'both runtimes to return to an offered non-immersive state',
 ) {
   await waitFor(async () => {
-    const cliStatus = await callCliToolOutcome(cliWorkspace, 'xr_get_session_status');
-    const mcpStatus = await callMcpToolOutcome(client, 'xr_get_session_status', {});
+    const cliStatus = await callCliToolOutcome(
+      cliWorkspace,
+      'xr_get_session_status',
+    );
+    const mcpStatus = await callMcpToolOutcome(
+      client,
+      'xr_get_session_status',
+      {},
+    );
     return (
       cliStatus.ok &&
       mcpStatus.ok &&
@@ -687,7 +844,10 @@ async function waitForOfferedState(
 }
 
 async function resetRuntimeBaseline(cliWorkspace, client) {
-  const cliReload = await callCliToolOutcome(cliWorkspace, 'browser_reload_page');
+  const cliReload = await callCliToolOutcome(
+    cliWorkspace,
+    'browser_reload_page',
+  );
   const mcpReload = await callMcpToolOutcome(client, 'browser_reload_page', {});
   assert(
     cliReload.ok,
@@ -704,7 +864,7 @@ async function runParitySweep(cliWorkspace, mcpWorkspace) {
   const { RUNTIME_MCP_TOOLS } = getRuntimeContract();
   const { Client, StdioClientTransport } = await loadMcpSdk();
   const transport = new StdioClientTransport({
-    command: process.execPath,
+    command: NODE_BINARY,
     args: [CLI_PATH, 'mcp', 'stdio'],
     cwd: mcpWorkspace,
     stderr: 'pipe',
@@ -717,8 +877,12 @@ async function runParitySweep(cliWorkspace, mcpWorkspace) {
 
   try {
     const listedTools = await client.listTools();
-    const expectedToolNames = [...RUNTIME_MCP_TOOLS.map((tool) => tool.name)].sort();
-    const actualToolNames = [...listedTools.tools.map((tool) => tool.name)].sort();
+    const expectedToolNames = [
+      ...RUNTIME_MCP_TOOLS.map((tool) => tool.name),
+    ].sort();
+    const actualToolNames = [
+      ...listedTools.tools.map((tool) => tool.name),
+    ].sort();
     assert.deepEqual(
       actualToolNames,
       expectedToolNames,
@@ -732,7 +896,11 @@ async function runParitySweep(cliWorkspace, mcpWorkspace) {
     for (const step of SMOKE_STEPS) {
       const cliArgs = step.args(context);
       const mcpArgs = step.args(context);
-      let cliOutcome = await callCliToolOutcome(cliWorkspace, step.name, cliArgs);
+      let cliOutcome = await callCliToolOutcome(
+        cliWorkspace,
+        step.name,
+        cliArgs,
+      );
       cliOutcome = await recoverCliOutcome(
         cliWorkspace,
         'cli',
@@ -751,8 +919,14 @@ async function runParitySweep(cliWorkspace, mcpWorkspace) {
       );
 
       if (step.expectError) {
-        assert(!cliOutcome.ok, `CLI ${step.name} should fail for smoke coverage`);
-        assert(!mcpOutcome.ok, `MCP ${step.name} should fail for smoke coverage`);
+        assert(
+          !cliOutcome.ok,
+          `CLI ${step.name} should fail for smoke coverage`,
+        );
+        assert(
+          !mcpOutcome.ok,
+          `MCP ${step.name} should fail for smoke coverage`,
+        );
         assertEquivalent(
           `${step.name} (error)`,
           step.name,
@@ -760,13 +934,27 @@ async function runParitySweep(cliWorkspace, mcpWorkspace) {
           normalizeMcpError(mcpOutcome.error),
         );
       } else {
-        assert(cliOutcome.ok, `CLI ${step.name} failed: ${JSON.stringify(cliOutcome.error)}`);
-        assert(mcpOutcome.ok, `MCP ${step.name} failed: ${JSON.stringify(mcpOutcome.error)}`);
-        assertEquivalent(step.name, step.name, cliOutcome.result, mcpOutcome.result);
+        assert(
+          cliOutcome.ok,
+          `CLI ${step.name} failed: ${JSON.stringify(cliOutcome.error)}`,
+        );
+        assert(
+          mcpOutcome.ok,
+          `MCP ${step.name} failed: ${JSON.stringify(mcpOutcome.error)}`,
+        );
+        assertEquivalent(
+          step.name,
+          step.name,
+          cliOutcome.result,
+          mcpOutcome.result,
+        );
       }
 
       if (step.expectTabMetadata) {
-        assert(mcpOutcome.tab?.id, `MCP ${step.name} should include _tab metadata`);
+        assert(
+          mcpOutcome.tab?.id,
+          `MCP ${step.name} should include _tab metadata`,
+        );
       }
 
       console.log(`PASS ${step.name}`);
@@ -780,19 +968,34 @@ async function runParitySweep(cliWorkspace, mcpWorkspace) {
       }
 
       if (step.name === 'browser_reload_page') {
-        await waitForOfferedState(cliWorkspace, client, 'final browser reload to settle');
-        const postReloadStatus = await callMcpToolOutcome(client, 'xr_get_session_status', {});
+        await waitForOfferedState(
+          cliWorkspace,
+          client,
+          'final browser reload to settle',
+        );
+        const postReloadStatus = await callMcpToolOutcome(
+          client,
+          'xr_get_session_status',
+          {},
+        );
         assert(
           postReloadStatus.ok,
           `MCP xr_get_session_status failed after reload: ${JSON.stringify(postReloadStatus.error)}`,
         );
-        assert(postReloadStatus.tab?.id, 'MCP xr_get_session_status should include _tab metadata after reload');
+        assert(
+          postReloadStatus.tab?.id,
+          'MCP xr_get_session_status should include _tab metadata after reload',
+        );
         context.reloadedTabId = postReloadStatus.tab.id;
 
         const tabChanged = context.reloadedTabId !== context.initialTabId;
         const sawWarning =
-          mcpOutcome.warnings.some((text) => text.includes(TAB_CHANGE_WARNING)) ||
-          postReloadStatus.warnings.some((text) => text.includes(TAB_CHANGE_WARNING));
+          mcpOutcome.warnings.some((text) =>
+            text.includes(TAB_CHANGE_WARNING),
+          ) ||
+          postReloadStatus.warnings.some((text) =>
+            text.includes(TAB_CHANGE_WARNING),
+          );
         const reloadDetail = tabChanged
           ? `tab changed to ${context.reloadedTabId}`
           : sawWarning
@@ -809,8 +1012,11 @@ async function runParitySweep(cliWorkspace, mcpWorkspace) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   let runError = null;
+  const runtimeLogs = [];
 
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'iwsdk-cli-mcp-parity-'));
+  const tempRoot = await mkdtemp(
+    path.join(os.tmpdir(), 'iwsdk-cli-mcp-parity-'),
+  );
   const cliWorkspace = path.join(tempRoot, 'poke-cli');
   const mcpWorkspace = path.join(tempRoot, 'poke-mcp');
   normalizationWorkspaceRoots = [cliWorkspace, mcpWorkspace];
@@ -826,6 +1032,7 @@ async function main() {
     console.log('Building internal runtime CLI package');
     await runCommand('pnpm', ['--filter', '@iwsdk/cli', 'build']);
     await loadRuntimeContract();
+    await loadRuntimeTransport();
     assertSmokeCoverage();
 
     console.log(`Preparing temporary poke clones in ${tempRoot}`);
@@ -835,8 +1042,18 @@ async function main() {
     await installWorkspace(cliWorkspace, 'cli');
     await installWorkspace(mcpWorkspace, 'mcp');
 
-    await ensureRuntimeStarted(cliWorkspace, 'cli');
-    await ensureRuntimeStarted(mcpWorkspace, 'mcp');
+    const cliRuntime = await ensureRuntimeStarted(cliWorkspace, 'cli');
+    runtimeLogs.push({
+      label: 'cli',
+      workspaceRoot: cliWorkspace,
+      logPath: cliRuntime.logPath ?? null,
+    });
+    const mcpRuntime = await ensureRuntimeStarted(mcpWorkspace, 'mcp');
+    runtimeLogs.push({
+      label: 'mcp',
+      workspaceRoot: mcpWorkspace,
+      logPath: mcpRuntime.logPath ?? null,
+    });
 
     await warmBrowser(cliWorkspace, 'cli');
     await warmBrowser(mcpWorkspace, 'mcp');
@@ -845,6 +1062,14 @@ async function main() {
     console.log('ALL_PARITY_CHECKS_PASSED');
   } catch (error) {
     runError = error;
+    if (runtimeLogs.length > 0) {
+      console.error('Runtime logs retained for diagnostics:');
+      for (const entry of runtimeLogs) {
+        console.error(
+          `  [${entry.label}] workspace=${entry.workspaceRoot} log=${entry.logPath ?? 'n/a'}`,
+        );
+      }
+    }
     throw error;
   } finally {
     const cleanupErrors = [];
@@ -858,16 +1083,21 @@ async function main() {
         const cleanupError =
           error instanceof Error ? error : new Error(String(error));
         cleanupErrors.push(cleanupError);
-        console.warn(`[${label}] failed to stop cleanly: ${cleanupError.message}`);
+        console.warn(
+          `[${label}] failed to stop cleanly: ${cleanupError.message}`,
+        );
       }
     }
-    if (options.keepTemp) {
+    if (options.keepTemp || runError) {
       console.log(`Keeping temporary workspaces at ${tempRoot}`);
     } else {
       await rm(tempRoot, { recursive: true, force: true });
     }
     if (cleanupErrors.length > 0 && !runError) {
-      throw new AggregateError(cleanupErrors, 'Failed to stop parity runtimes cleanly');
+      throw new AggregateError(
+        cleanupErrors,
+        'Failed to stop parity runtimes cleanly',
+      );
     }
   }
 }
@@ -876,6 +1106,8 @@ try {
   await main();
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
-  console.error('Re-run with --keep-temp to inspect the temporary parity workspaces.');
+  console.error(
+    'Temporary parity workspaces were preserved so the runtime logs and cloned apps can be inspected.',
+  );
   process.exit(1);
 }

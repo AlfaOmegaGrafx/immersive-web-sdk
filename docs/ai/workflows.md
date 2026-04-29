@@ -15,13 +15,15 @@ The canonical front door is now the `iwsdk` CLI. Use it to:
 - generate stable editor adapter configs with `iwsdk adapter sync`
 - inspect the exported MCP surface with `iwsdk mcp inspect`
 - call the runtime directly with `iwsdk xr ...`, `iwsdk browser ...`, `iwsdk scene ...`, and `iwsdk ecs ...`
-- validate the full live CLI/MCP surface with `pnpm test:cli-mcp-parity`
+- validate the full live runtime CLI/MCP surface with `pnpm test:cli-mcp-parity`
+- validate the exported reference CLI/MCP surface with `pnpm test:reference-cli-mcp-parity`
+- run both guardrails together with `pnpm test:mcp-parity`
 
 Managed MCP configs should point to the workspace-local `@iwsdk/cli` entrypoint, not directly to per-run ports. Starter `npm run dev`, explicit `iwsdk dev up`, and `iwsdk adapter sync` all use that same canonical CLI-managed path.
 
 If a workspace still has older port-bound runtime entries checked in, run `iwsdk adapter sync` once to migrate and prune them.
 
-The parity harness spins up two temporary `poke` runtimes, drives every runtime tool through both entrypoints, and fails on any semantic mismatch after normalizing expected per-instance timing noise.
+The runtime parity harness spins up two temporary `poke` runtimes, drives every runtime tool through both entrypoints, and fails on any semantic mismatch after normalizing expected per-instance timing noise. The reference parity harness checks that `@iwsdk/reference` CLI inspection output and MCP tool discovery both stay aligned with the exported reference contract, so contributors should run it whenever they change reference tool names, schemas, handlers, or CLI routing.
 
 Common CLI/MCP equivalents:
 
@@ -49,7 +51,7 @@ The most basic workflow: make a change, take a screenshot, verify the result.
 ::: tip Always call `xr_get_session_status` first
 Before doing anything else, call `xr_get_session_status` to confirm the runtime is up and the browser bridge is ready. The response includes browser readiness metadata as well as XR session state.
 
-If your editor defers MCP tool schemas, first hydrate the `mcp__iwsdk__*` tools with the editor's tool-search/discovery step. Until those schemas are loaded, use the equivalent CLI checks (`iwsdk xr status`, `iwsdk dev status`) instead of guessing at the MCP shape.
+If your editor defers MCP tool schemas, first hydrate the `mcp__iwsdk-runtime__*` tools with the editor's tool-search/discovery step. Until those schemas are loaded, use the equivalent CLI checks (`iwsdk xr status`, `iwsdk dev status`) instead of guessing at the MCP shape.
 :::
 
 ::: tip

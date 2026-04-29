@@ -45,7 +45,7 @@ function getDownloadUrl(platform?: Platform): string {
 /** Normalize version to major.minor.patch */
 function normalizeVersion(v: string): string {
   const parts = v.split('.');
-  while (parts.length < 3) parts.push('0');
+  while (parts.length < 3) {parts.push('0');}
   return parts.slice(0, 3).join('.');
 }
 
@@ -54,8 +54,8 @@ function isVersionSufficient(installed: string, required: string): boolean {
   const iParts = normalizeVersion(installed).split('.').map(Number);
   const rParts = normalizeVersion(required).split('.').map(Number);
   for (let i = 0; i < 3; i++) {
-    if (iParts[i] > rParts[i]) return true;
-    if (iParts[i] < rParts[i]) return false;
+    if (iParts[i] > rParts[i]) {return true;}
+    if (iParts[i] < rParts[i]) {return false;}
   }
   return true; // equal
 }
@@ -75,7 +75,7 @@ function getMacOSAppVersion(appPath: string): string | null {
 
 function getWindowsAppVersion(basePath: string): string | null {
   const highestVersion = getHighestVersion(basePath);
-  if (!highestVersion) return null;
+  if (!highestVersion) {return null;}
   const vNum = parseInt(highestVersion.substring(1), 10);
   return `${vNum}.0.0`;
 }
@@ -113,7 +113,7 @@ function detectMSEVersion(platform: Platform): string | null {
   }
 
   const installPath = MSE_INSTALL_PATHS[platform];
-  if (!installPath || !fs.existsSync(installPath)) return null;
+  if (!installPath || !fs.existsSync(installPath)) {return null;}
 
   return platform === 'darwin'
     ? getMacOSAppVersion(installPath)

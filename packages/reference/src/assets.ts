@@ -6,6 +6,7 @@
  */
 
 import { createHash } from 'crypto';
+import { spawnSync } from 'child_process';
 import {
   createReadStream,
   createWriteStream,
@@ -16,6 +17,12 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import * as tar from 'tar';
+import {
+  buildReferenceEmbeddingModelMetadata,
+  hasReferenceEmbeddingModelFiles,
+  REFERENCE_MODEL_FILE_SOURCES,
+  REFERENCE_MODEL_ONNX_URL,
+} from './model-contract.js';
 import { findReferenceWorkspaceRoot, PACKAGE_ROOT } from './paths.js';
 import {
   isReferenceEmbeddingModelMetadata,
@@ -23,16 +30,12 @@ import {
   type ReferenceEmbeddingModelMetadata,
 } from './types.js';
 
-const STATE_SCHEMA_VERSION = 3;
+export { REFERENCE_MODEL_ONNX_URL } from './model-contract.js';
+
+const STATE_SCHEMA_VERSION = 4;
 const MANIFEST_SCHEMA_VERSION = 3;
 const REFERENCE_ASSETS_PACKAGE_NAME = '@iwsdk/reference-assets';
 const REFERENCE_STATE_RELATIVE_DIR = path.join('.iwsdk', 'reference');
-const REQUIRED_MODEL_FILES = [
-  'config.json',
-  'tokenizer.json',
-  'tokenizer_config.json',
-  path.join('onnx', 'model_quantized.onnx'),
-] as const;
 
 export type ReferenceInitState =
   | 'not_started'
@@ -176,11 +179,6 @@ function getReferenceAssetsBaseUrls(): string[] {
   ];
 }
 
-function getReferenceModelUrl(): string | null {
-  const override = process.env.IWSDK_REFERENCE_MODEL_URL?.trim();
-  return override ? override : null;
-}
-
 function getDefaultSharedCacheRoot(): string {
   if (process.platform === 'darwin') {
     return path.join(os.homedir(), 'Library', 'Caches', 'iwsdk', 'reference');
@@ -240,6 +238,38 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function downloadWithCurl(sourceUrl: string, destination: string): void {
+  const result = spawnSync(
+    'curl',
+    ['-L', '--fail', '--silent', '--show-error', sourceUrl, '--output', destination],
+    {
+      encoding: 'utf8',
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `Unable to fetch ${sourceUrl}: ${result.stderr?.trim() || 'curl failed'}`,
+    );
+  }
+}
+
+function fetchJsonWithCurl(sourceUrl: string): unknown {
+  const result = spawnSync(
+    'curl',
+    ['-L', '--fail', '--silent', '--show-error', sourceUrl],
+    {
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `Unable to fetch ${sourceUrl}: ${result.stderr?.trim() || 'curl failed'}`,
+    );
+  }
+  return JSON.parse(result.stdout);
+}
+
 function isPidAlive(pid: number | null): boolean {
   if (!Number.isInteger(pid) || Number(pid) <= 0) {
     return false;
@@ -256,7 +286,7 @@ function isPidAlive(pid: number | null): boolean {
 function buildWarmupRequiredMessage(): string {
   return (
     'IWSDK reference assets are not initialized yet. ' +
-    'Set IWSDK_REFERENCE_MODEL_URL if the matching model archive is not already cached, then run "iwsdk reference warmup" before using reference tools.'
+    'Run "iwsdk reference warmup" before using reference tools so the corpus and pinned embedding model are ready.'
   );
 }
 
@@ -380,7 +410,7 @@ async function readEmbeddingsData(
 
   if (!isReferenceEmbeddingModelMetadata(parsed.model)) {
     throw new Error(
-      `Reference embeddings at ${embeddingsPath} are missing archive-backed model metadata.`,
+      `Reference embeddings at ${embeddingsPath} are missing pinned model metadata.`,
     );
   }
 
@@ -418,15 +448,46 @@ async function validateDataDir(dataDir: string): Promise<boolean> {
 }
 
 async function validateModelDir(modelDir: string): Promise<boolean> {
-  for (const relativePath of REQUIRED_MODEL_FILES) {
-    try {
-      await stat(path.join(modelDir, relativePath));
-    } catch {
-      return false;
-    }
-  }
+  return hasReferenceEmbeddingModelFiles(modelDir);
+}
 
-  return true;
+async function createDeterministicModelArchive(
+  sourceDir: string,
+  archivePath: string,
+): Promise<void> {
+  await tar.c(
+    {
+      cwd: path.dirname(sourceDir),
+      file: archivePath,
+      gzip: true,
+      portable: true,
+      noPax: true,
+      mtime: new Date(0),
+    },
+    [path.basename(sourceDir)],
+  );
+}
+
+async function readInstalledModelMetadata(
+  modelDir: string,
+): Promise<ReferenceEmbeddingModelMetadata> {
+  const archivePath = path.join(
+    getStagingRoot(),
+    'verification',
+    `model-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tgz`,
+  );
+  await mkdir(path.dirname(archivePath), { recursive: true });
+
+  try {
+    await createDeterministicModelArchive(modelDir, archivePath);
+    const archiveStat = await stat(archivePath);
+    return buildReferenceEmbeddingModelMetadata(
+      await sha256File(archivePath),
+      archiveStat.size,
+    );
+  } finally {
+    await rm(archivePath, { force: true }).catch(() => {});
+  }
 }
 
 async function readCurrentModelMetadata(
@@ -549,7 +610,7 @@ export async function getReferenceCacheStatus(): Promise<ReferenceCacheStatus> {
         return buildFailureStatus(
           packageVersion,
           state,
-          `Reference model cache sha ${state.modelSha256} does not match the warmed corpus metadata ${model.archiveSha256}. Run "iwsdk reference warmup" again with IWSDK_REFERENCE_MODEL_URL pointing at the matching model archive.`,
+          `Reference model cache sha ${state.modelSha256} does not match the warmed corpus metadata ${model.archiveSha256}. Run "iwsdk reference warmup" again to refresh the pinned model files.`,
         );
       }
 
@@ -558,6 +619,18 @@ export async function getReferenceCacheStatus(): Promise<ReferenceCacheStatus> {
           packageVersion,
           state,
           'Reference model cache is incomplete or corrupted. Run "iwsdk reference warmup" again.',
+        );
+      }
+
+      const installedModel = await readInstalledModelMetadata(state.modelDir);
+      if (
+        installedModel.archiveSha256 !== model.archiveSha256 ||
+        installedModel.archiveSize !== model.archiveSize
+      ) {
+        return buildFailureStatus(
+          packageVersion,
+          state,
+          `Reference model cache metadata ${installedModel.archiveSha256}/${installedModel.archiveSize} does not match the warmed corpus metadata ${model.archiveSha256}/${model.archiveSize}. Run "iwsdk reference warmup" again to refresh the pinned model files.`,
         );
       }
 
@@ -705,15 +778,26 @@ async function fetchManifest(
     });
 
     try {
-      const response = await fetch(manifestUrl);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      let parsedManifest: ReferenceAssetsManifest;
+      try {
+        const response = await fetch(manifestUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        parsedManifest = (await response.json()) as ReferenceAssetsManifest;
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.startsWith('HTTP ')
+        ) {
+          throw error;
+        }
+        parsedManifest = fetchJsonWithCurl(
+          manifestUrl,
+        ) as ReferenceAssetsManifest;
       }
 
-      const manifest = validateManifest(
-        (await response.json()) as ReferenceAssetsManifest,
-        packageVersion,
-      );
+      const manifest = validateManifest(parsedManifest, packageVersion);
       return {
         manifest,
         manifestUrl,
@@ -806,18 +890,29 @@ async function downloadArchive(
     });
 
     try {
-      const response = await fetch(sourceUrl);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      try {
+        const response = await fetch(sourceUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
 
-      await writeResponseToFile(
-        response,
-        destination,
-        asset,
-        sourceUrl,
-        onEvent,
-      );
+        await writeResponseToFile(
+          response,
+          destination,
+          asset,
+          sourceUrl,
+          onEvent,
+        );
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.startsWith('HTTP ')
+        ) {
+          throw error;
+        }
+        await rm(destination, { force: true });
+        downloadWithCurl(sourceUrl, destination);
+      }
 
       const actualSha = await sha256File(destination);
       if (actualSha !== expectedSha256) {
@@ -900,7 +995,7 @@ async function installDataArchive(
   await mkdir(path.dirname(finalRoot), { recursive: true });
   const tempFinalRoot = `${finalRoot}.tmp-${process.pid}-${Date.now()}`;
   await rm(tempFinalRoot, { recursive: true, force: true });
-  await rename(extractRoot, tempFinalRoot);
+  await rename(path.dirname(extractedDir), tempFinalRoot);
 
   try {
     await rename(tempFinalRoot, finalRoot);
@@ -914,10 +1009,74 @@ async function installDataArchive(
   return finalDir;
 }
 
-async function installModelArchive(
+async function downloadPinnedModelFile(
+  destination: string,
+  sourceUrl: string,
+  expected: {
+    sha256?: string;
+    size?: number;
+  } = {},
+  onEvent?: (event: ReferenceWarmupEvent) => void,
+): Promise<void> {
+  try {
+    const response = await fetch(sourceUrl);
+    if (!response.ok) {
+      throw new Error(`Unable to fetch ${sourceUrl}: HTTP ${response.status}`);
+    }
+
+    await writeResponseToFile(
+      response,
+      destination,
+      'model',
+      sourceUrl,
+      onEvent,
+    );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith(`Unable to fetch ${sourceUrl}: HTTP `)
+    ) {
+      throw error;
+    }
+    await rm(destination, { force: true }).catch(() => {});
+    try {
+      downloadWithCurl(sourceUrl, destination);
+    } catch (curlError) {
+      throw new Error(
+        `Unable to fetch ${sourceUrl}: ${
+          curlError instanceof Error
+            ? curlError.message.replace(/^Unable to fetch [^:]+: /, '')
+            : error instanceof Error
+              ? error.message
+              : String(error)
+        }`,
+      );
+    }
+  }
+
+  const downloaded = await stat(destination);
+  if (
+    typeof expected.size === 'number' &&
+    Number.isFinite(expected.size) &&
+    downloaded.size !== expected.size
+  ) {
+    throw new Error(
+      `Size mismatch for ${sourceUrl}: expected ${expected.size}, got ${downloaded.size}`,
+    );
+  }
+  if (expected.sha256) {
+    const actualSha = await sha256File(destination);
+    if (actualSha !== expected.sha256) {
+      throw new Error(
+        `Checksum mismatch for ${sourceUrl}: expected ${expected.sha256}, got ${actualSha}`,
+      );
+    }
+  }
+}
+
+async function installPinnedModelFiles(
   metadata: ReferenceEmbeddingModelMetadata,
   stagingRoot: string,
-  modelUrl: string | null,
   sharedRoot = getReferenceSharedCacheRoot(),
   onEvent?: (event: ReferenceWarmupEvent) => void,
 ): Promise<string> {
@@ -927,57 +1086,62 @@ async function installModelArchive(
   );
   const finalDir = path.join(finalRoot, 'model');
   if (await validateModelDir(finalDir)) {
-    return finalDir;
+    const installedModel = await readInstalledModelMetadata(finalDir);
+    if (
+      installedModel.archiveSha256 === metadata.archiveSha256 &&
+      installedModel.archiveSize === metadata.archiveSize
+    ) {
+      return finalDir;
+    }
+    await rm(finalRoot, { recursive: true, force: true });
   }
 
-  if (!modelUrl) {
+  const extractedDir = path.join(stagingRoot, 'model-extract', 'model');
+  const archivePath = path.join(stagingRoot, 'model.tgz');
+  await rm(path.dirname(extractedDir), { recursive: true, force: true });
+  await mkdir(path.join(extractedDir, 'onnx'), { recursive: true });
+
+  for (const file of REFERENCE_MODEL_FILE_SOURCES) {
+    const destination = path.join(extractedDir, file.relativePath);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await downloadPinnedModelFile(destination, file.sourceUrl, {}, onEvent);
+  }
+
+  if (!(await validateModelDir(extractedDir))) {
+    throw new Error('Pinned reference model files are incomplete after download.');
+  }
+
+  await createDeterministicModelArchive(extractedDir, archivePath);
+  const archiveStat = await stat(archivePath);
+  const archiveSha256 = await sha256File(archivePath);
+  if (archiveStat.size !== metadata.archiveSize) {
     throw new Error(
-      'IWSDK_REFERENCE_MODEL_URL is required to warm the reference model cache. Set it to the hosted model.tgz URL and rerun "iwsdk reference warmup".',
+      `Pinned reference model archive size ${archiveStat.size} does not match the warmed corpus metadata ${metadata.archiveSize}. Run "iwsdk reference warmup" again to refresh the pinned model files.`,
     );
   }
-
-  const archivePath = path.join(stagingRoot, 'model.tgz');
-  const extractRoot = path.join(stagingRoot, 'model-extract');
-  await rm(archivePath, { force: true });
-  await rm(extractRoot, { recursive: true, force: true });
-  await mkdir(extractRoot, { recursive: true });
-
-  await downloadArchive(
-    'model',
-    archivePath,
-    [modelUrl],
-    metadata.archiveSha256,
-    metadata.archiveSize,
-    onEvent,
-  );
-
-  onEvent?.({
-    phase: 'extracting',
-    asset: 'model',
-    message: 'Extracting model archive',
-  });
-  await tar.x({
-    file: archivePath,
-    cwd: extractRoot,
-  });
-
-  const extractedDir = path.join(extractRoot, 'model');
-  if (!(await validateModelDir(extractedDir))) {
+  if (archiveSha256 !== metadata.archiveSha256) {
     throw new Error(
-      'Extracted model archive is missing expected files. Ensure IWSDK_REFERENCE_MODEL_URL points at a valid model.tgz built from packages/reference-assets/model.',
+      `Pinned reference model archive sha ${archiveSha256} does not match the warmed corpus metadata ${metadata.archiveSha256}. Run "iwsdk reference warmup" again to refresh the pinned model files.`,
     );
   }
 
   await mkdir(path.dirname(finalRoot), { recursive: true });
   const tempFinalRoot = `${finalRoot}.tmp-${process.pid}-${Date.now()}`;
   await rm(tempFinalRoot, { recursive: true, force: true });
-  await rename(extractRoot, tempFinalRoot);
+  await rename(path.dirname(extractedDir), tempFinalRoot);
 
   try {
     await rename(tempFinalRoot, finalRoot);
   } catch (error) {
     await rm(tempFinalRoot, { recursive: true, force: true });
     if (!(await validateModelDir(finalDir))) {
+      throw error;
+    }
+    const installedModel = await readInstalledModelMetadata(finalDir);
+    if (
+      installedModel.archiveSha256 !== metadata.archiveSha256 ||
+      installedModel.archiveSize !== metadata.archiveSize
+    ) {
       throw error;
     }
   }
@@ -1056,11 +1220,9 @@ export async function warmupReferenceAssets({
     await writeStateFile(state);
 
     const embeddings = await readEmbeddingsData(dataDir);
-    const modelUrl = getReferenceModelUrl();
-    const modelDir = await installModelArchive(
+    const modelDir = await installPinnedModelFiles(
       embeddings.model,
       stagingRoot,
-      modelUrl,
       sharedRoot,
       onEvent,
     );
@@ -1068,7 +1230,7 @@ export async function warmupReferenceAssets({
       ...state,
       modelDir,
       modelSha256: embeddings.model.archiveSha256,
-      modelUrl,
+      modelUrl: REFERENCE_MODEL_ONNX_URL,
       updatedAt: nowIso(),
     };
     await writeStateFile(state);
@@ -1087,7 +1249,7 @@ export async function warmupReferenceAssets({
       dataSha256: manifest.assets.data.sha256,
       modelDir,
       modelSha256: embeddings.model.archiveSha256,
-      modelUrl,
+      modelUrl: REFERENCE_MODEL_ONNX_URL,
       completedAt,
       updatedAt: completedAt,
       error: null,

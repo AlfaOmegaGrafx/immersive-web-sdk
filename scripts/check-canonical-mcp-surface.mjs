@@ -6,11 +6,25 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { readdir, readFile } from 'fs/promises';
+import { readdir, readFile, stat } from 'fs/promises';
 import path from 'path';
 
 const REPO_ROOT = process.cwd();
-const INCLUDE_ROOTS = ['docs', 'packages/starter-assets', 'examples'];
+const MCP_SURFACE_MARKERS_PATH = path.join(
+  REPO_ROOT,
+  'packages',
+  'cli',
+  'src',
+  'mcp-surface-markers.json',
+);
+const INCLUDE_TARGETS = [
+  'docs/ai',
+  'packages/create/src/installer.ts',
+  'packages/cli/src/help.ts',
+  'packages/starter-assets/PROJECT_AGENTS.md',
+  'packages/starter-assets/PROJECT_CLAUDE.md',
+  'packages/starter-assets/starter-template',
+];
 const INCLUDE_EXTENSIONS = new Set([
   '.json',
   '.js',
@@ -21,38 +35,66 @@ const INCLUDE_EXTENSIONS = new Set([
   '.ts',
 ]);
 const IGNORE_DIRS = new Set(['dist', 'node_modules']);
-const IGNORE_BASENAMES = new Set(['package-lock.json']);
-const BANNED_PATTERNS = [
-  {
-    label: 'legacy server name',
-    regex: /iwsdk-dev-mcp/g,
-  },
-  {
-    label: 'legacy tool prefix',
-    regex: /mcp__iwsdk-dev-mcp__/g,
-  },
-  {
-    label: 'port-embedded managed entry',
-    regex: /--port/g,
-  },
-  {
-    label: 'fixed starter/example port',
-    regex: /\b8081\b/g,
-  },
-  {
-    label: 'workspace-bound MCP entry',
-    regex: /mcp stdio --workspace|"--workspace"/g,
-  },
-  {
-    label: 'target selection command',
-    regex: /target (list|use|current|clear)/g,
-  },
-  {
-    label: 'broker-era wording',
-    regex:
-      /\bbroker-backed\b|\bbroker-managed\b|\bbroker-era\b|\bdev-broker\b|\bbroker resolves\b/g,
-  },
-];
+const IGNORE_BASENAMES = new Set(['CHANGELOG.md', 'package-lock.json']);
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildBannedPatterns(surfaceMarkers) {
+  const patterns = [];
+
+  for (const name of surfaceMarkers.legacyServerNames) {
+    if (name === 'iwsdk') {
+      patterns.push({
+        label: `legacy server name (${name})`,
+        regex: /"iwsdk"\s*:|\[mcp_servers\.iwsdk\]/g,
+      });
+    } else {
+      patterns.push({
+        label: `legacy server name (${name})`,
+        regex: new RegExp(escapeRegex(name), 'g'),
+      });
+    }
+
+    patterns.push({
+      label: `legacy tool prefix (${name})`,
+      regex: new RegExp(escapeRegex(`mcp__${name}__`), 'g'),
+    });
+  }
+
+  for (const argToken of surfaceMarkers.legacyArgTokens) {
+    if (argToken === '--workspace') {
+      patterns.push({
+        label: 'workspace-bound MCP entry',
+        regex: /mcp stdio --workspace|"--workspace"/g,
+      });
+      continue;
+    }
+
+    if (argToken === '--port') {
+      patterns.push({
+        label: 'port-embedded managed entry',
+        regex: /--port/g,
+      });
+      continue;
+    }
+  }
+
+  patterns.push(
+    {
+      label: 'target selection command',
+      regex: /target (list|use|current|clear)/g,
+    },
+    {
+      label: 'broker-era wording',
+      regex:
+        /\bbroker-backed\b|\bbroker-managed\b|\bbroker-era\b|\bdev-broker\b|\bbroker resolves\b/g,
+    },
+  );
+
+  return patterns;
+}
 
 async function walk(root, relativeDir = '') {
   const absoluteDir = path.join(root, relativeDir);
@@ -83,18 +125,34 @@ async function walk(root, relativeDir = '') {
   return files;
 }
 
+async function collectFiles(includeTarget) {
+  const absoluteTarget = path.join(REPO_ROOT, includeTarget);
+  const targetStat = await stat(absoluteTarget);
+  if (targetStat.isDirectory()) {
+    const files = await walk(absoluteTarget);
+    return files.map((relativeFile) => path.join(includeTarget, relativeFile));
+  }
+  if (targetStat.isFile()) {
+    return [includeTarget];
+  }
+  return [];
+}
+
 async function main() {
+  const surfaceMarkers = JSON.parse(
+    await readFile(MCP_SURFACE_MARKERS_PATH, 'utf8'),
+  );
+  const bannedPatterns = buildBannedPatterns(surfaceMarkers);
   const violations = [];
 
-  for (const includeRoot of INCLUDE_ROOTS) {
-    const absoluteRoot = path.join(REPO_ROOT, includeRoot);
-    const files = await walk(absoluteRoot);
+  for (const includeTarget of INCLUDE_TARGETS) {
+    const files = await collectFiles(includeTarget);
 
     for (const relativeFile of files) {
-      const absoluteFile = path.join(absoluteRoot, relativeFile);
+      const absoluteFile = path.join(REPO_ROOT, relativeFile);
       const content = await readFile(absoluteFile, 'utf8');
 
-      for (const pattern of BANNED_PATTERNS) {
+      for (const pattern of bannedPatterns) {
         if (pattern.regex.test(content)) {
           violations.push({
             file: path.relative(REPO_ROOT, absoluteFile),

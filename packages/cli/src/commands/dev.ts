@@ -17,7 +17,14 @@ import type {
   CliSuccess,
   ResolvedCliIo,
 } from '../cli-types.js';
-import type { RuntimeIssueInfo, RuntimeSession } from '../runtime-contract.js';
+import {
+  hasRuntimeBrowserCommandReadyContract,
+  INTERNAL_BROWSER_PROBE_METHOD,
+  isRuntimeBrowserCommandReady,
+  type RuntimeBrowserProbeResult,
+  type RuntimeIssueInfo,
+  type RuntimeSession,
+} from '../runtime-contract.js';
 import {
   clearLaunchMetadata,
   ensureRuntimeLogsDir,
@@ -28,6 +35,7 @@ import {
   resolveWorkspaceRoot,
   setLaunchMetadata,
 } from '../runtime-state.js';
+import { RuntimeCommandExecutionError, sendRuntimeCommand } from '../runtime-transport.js';
 import { syncStableAdaptersForWorkspace } from './adapter.js';
 import { handleStatus } from './status.js';
 
@@ -50,6 +58,93 @@ interface WaitForRuntimeSessionResult {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTraceEnabled(): boolean {
+  return process.env.IWSDK_RUNTIME_TRACE === '1';
+}
+
+function traceDev(event: string, details: Record<string, unknown> = {}): void {
+  if (!isTraceEnabled()) {
+    return;
+  }
+  console.error(`[IWSDK-RUNTIME-TRACE][dev] ${event} ${JSON.stringify(details)}`);
+}
+
+function isBrowserProbeResult(
+  value: unknown,
+): value is RuntimeBrowserProbeResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as RuntimeBrowserProbeResult).bridgeConnected === 'boolean' &&
+    typeof (value as RuntimeBrowserProbeResult).commandReady === 'boolean' &&
+    typeof (value as RuntimeBrowserProbeResult).waitedForBridgeMs === 'number' &&
+    typeof (value as RuntimeBrowserProbeResult).browser === 'object'
+  );
+}
+
+async function probeBrowserCommandReady(
+  session: RuntimeSession,
+  timeoutMs: number,
+): Promise<{ ready: boolean; browserIssue?: RuntimeIssueInfo }> {
+  if (!session.browser) {
+    return { ready: true };
+  }
+  const usesCommandReadyContract =
+    hasRuntimeBrowserCommandReadyContract(session);
+  const browserReady = isRuntimeBrowserCommandReady(session);
+
+  traceDev('probe_start', {
+    port: session.port,
+    timeoutMs,
+    browserStatus: session.browser.status,
+    bridgeConnected: session.browser.connected,
+    commandReady: browserReady,
+    usesCommandReadyContract,
+  });
+
+  if (!usesCommandReadyContract) {
+    return { ready: browserReady };
+  }
+
+  try {
+    const response = await sendRuntimeCommand({
+      port: session.port,
+      method: INTERNAL_BROWSER_PROBE_METHOD,
+      timeoutMs,
+      runtimeSession: session,
+    });
+    const ready = isBrowserProbeResult(response.result)
+      ? response.result.commandReady
+      : false;
+    traceDev('probe_result', {
+      port: session.port,
+      ready,
+      result: isBrowserProbeResult(response.result) ? response.result : null,
+    });
+    return { ready };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const cause =
+      error instanceof RuntimeCommandExecutionError
+        ? error.issueCause
+        : session.browser.lastError?.cause;
+    traceDev('probe_error', {
+      port: session.port,
+      message,
+      cause: cause ?? null,
+    });
+    return {
+      ready: false,
+      browserIssue: {
+        cause: cause ?? 'browser_not_ready',
+        message,
+        at: new Date().toISOString(),
+      },
+    };
+  }
 }
 
 async function readPackageManifest(
@@ -103,7 +198,10 @@ function isForegroundLaunch(options: CliOptions): boolean {
   return options.foreground === true;
 }
 
-function getRunScriptArgs(packageManager: string, scriptName: string): string[] {
+function getRunScriptArgs(
+  packageManager: string,
+  scriptName: string,
+): string[] {
   switch (packageManager) {
     case 'yarn':
       return [scriptName];
@@ -128,12 +226,13 @@ async function waitForRuntimeSession(
 ): Promise<WaitForRuntimeSessionResult> {
   const deadline = Date.now() + timeoutMs;
   let lastSession: RuntimeSession | null = null;
+  let lastBrowserIssue: RuntimeIssueInfo | undefined;
 
   while (Date.now() < deadline) {
     const session = await getRuntimeSession(workspaceRoot);
     if (session) {
       lastSession = session;
-      if (!session.browser || session.browser.connected) {
+      if (!session.browser || isRuntimeBrowserCommandReady(session)) {
         return { session, exit: null, browserReady: true };
       }
       if (session.browser.status === 'launch_failed') {
@@ -141,13 +240,29 @@ async function waitForRuntimeSession(
           session,
           exit: null,
           browserReady: false,
-          browserIssue:
-            session.browser.lastError ?? {
-              cause: 'browser_launch_failed',
-              message: 'Managed browser launch failed.',
-              at: session.browser.lastTransitionAt,
-            },
+          browserIssue: session.browser.lastError ?? {
+            cause: 'browser_launch_failed',
+            message: 'Managed browser launch failed.',
+            at: session.browser.lastTransitionAt,
+          },
         };
+      }
+
+      const remainingMs = Math.max(deadline - Date.now(), 1);
+      const probe = await probeBrowserCommandReady(
+        session,
+        Math.min(remainingMs, 2500),
+      );
+      if (probe.ready) {
+        const refreshedSession = await getRuntimeSession(workspaceRoot);
+        return {
+          session: refreshedSession ?? session,
+          exit: null,
+          browserReady: true,
+        };
+      }
+      if (probe.browserIssue) {
+        lastBrowserIssue = probe.browserIssue;
       }
     }
 
@@ -157,29 +272,33 @@ async function waitForRuntimeSession(
         session: lastSession,
         exit,
         browserReady: false,
-        browserIssue: lastSession?.browser?.lastError,
+        browserIssue: lastBrowserIssue ?? lastSession?.browser?.lastError,
       };
     }
-    await sleep(500);
+    await sleep(250);
   }
 
   return {
     session: lastSession,
     exit: null,
-    browserReady: Boolean(lastSession && (!lastSession.browser || lastSession.browser.connected)),
-    browserIssue: lastSession?.browser
-      ? lastSession.browser.lastError ?? {
-          cause:
-            lastSession.browser.status === 'disconnected'
-              ? 'connection_lost'
-              : 'browser_not_ready',
-          message:
-            lastSession.browser.status === 'disconnected'
-              ? 'Managed browser runtime disconnected before becoming ready.'
-              : 'Managed browser did not finish connecting before the timeout elapsed.',
-          at: lastSession.browser.lastTransitionAt,
-        }
-      : undefined,
+    browserReady: Boolean(lastSession && isRuntimeBrowserCommandReady(lastSession)),
+    browserIssue:
+      lastBrowserIssue ??
+      (lastSession?.browser
+        ? (lastSession.browser.lastError ?? {
+            cause:
+              lastSession.browser.status === 'disconnected'
+                ? 'connection_lost'
+                : 'browser_not_ready',
+            message:
+              lastSession.browser.status === 'disconnected'
+                ? 'Managed browser runtime disconnected before becoming ready.'
+                : lastSession.browser.connected
+                  ? 'Managed browser bridge connected, but the command path did not finish warming up before the timeout elapsed.'
+                  : 'Managed browser did not finish connecting before the timeout elapsed.',
+            at: lastSession.browser.lastTransitionAt,
+          })
+        : undefined),
   };
 }
 
@@ -224,7 +343,9 @@ async function openUrl(url: string): Promise<void> {
   });
 }
 
-async function terminateRuntimeWorkspace(workspaceRoot: string): Promise<unknown> {
+async function terminateRuntimeWorkspace(
+  workspaceRoot: string,
+): Promise<unknown> {
   const state = await getWorkspaceRuntimeState(workspaceRoot);
   const pids = Array.from(
     new Set(
@@ -282,32 +403,65 @@ export async function handleDevUp(
 ): Promise<CliSuccess<unknown> | CliFailure | null> {
   const workspaceRoot = await resolveWorkspaceRoot({
     cwd: io.cwd,
-    workspace: typeof options.workspace === 'string' ? options.workspace : undefined,
+    workspace:
+      typeof options.workspace === 'string' ? options.workspace : undefined,
     requireRunning: false,
   });
 
+  const timeoutMs = parseIntegerOption(options.timeout, '--timeout', 60000);
   const foreground = isForegroundLaunch(options);
   const openBrowser = isOpenRequested(options);
   const existingSession = await getRuntimeSession(workspaceRoot);
   if (existingSession) {
-    if (openBrowser) {
-      await openUrl(existingSession.localUrl);
+    const waitResult = await waitForRuntimeSession(workspaceRoot, timeoutMs);
+    const launch = await getLaunchMetadata(workspaceRoot);
+    if (!waitResult.session) {
+      return createFailure(
+        formatMissingRuntimeMessage(workspaceRoot),
+        'dev_up_missing_runtime',
+        {
+          workspaceRoot,
+          launch,
+        },
+      );
     }
-    const adapters = await syncStableAdaptersForWorkspace(workspaceRoot, options);
+    if (!waitResult.browserReady) {
+      return createFailure(
+        waitResult.browserIssue?.message ??
+          `Managed browser did not become ready within ${timeoutMs}ms`,
+        'dev_browser_not_ready',
+        {
+          workspaceRoot,
+          logPath: launch?.logPath ?? null,
+          scriptName: launch?.scriptName,
+          session: waitResult.session,
+          browser: waitResult.session.browser ?? null,
+          cause: waitResult.browserIssue?.cause,
+        },
+      );
+    }
+    if (openBrowser) {
+      await openUrl(waitResult.session.localUrl);
+    }
+    const adapters = await syncStableAdaptersForWorkspace(
+      workspaceRoot,
+      options,
+    );
     if (foreground) {
-      io.stdout.write(`[IWSDK] Runtime already running at ${existingSession.localUrl}\n`);
+      io.stdout.write(
+        `[IWSDK] Runtime already running at ${waitResult.session.localUrl}\n`,
+      );
       return null;
     }
     return createSuccess({
       action: 'attached',
       workspaceRoot,
-      session: existingSession,
-      launch: await getLaunchMetadata(workspaceRoot),
+      session: waitResult.session,
+      launch,
       adapters,
     });
   }
 
-  const timeoutMs = parseIntegerOption(options.timeout, '--timeout', 60000);
   const packageManager = await detectPackageManager(workspaceRoot);
   const scriptName = await resolveDevRuntimeScript(workspaceRoot);
   const logPath = foreground ? null : await ensureLogPath(workspaceRoot);
@@ -346,7 +500,11 @@ export async function handleDevUp(
     openBrowser,
   });
 
-  const waitResult = await waitForRuntimeSession(workspaceRoot, timeoutMs, () => childExit);
+  const waitResult = await waitForRuntimeSession(
+    workspaceRoot,
+    timeoutMs,
+    () => childExit,
+  );
 
   if (!waitResult.session) {
     if (waitResult.exit) {
@@ -396,7 +554,7 @@ export async function handleDevUp(
         logPath,
         scriptName,
         session: waitResult.session,
-        browser: waitResult.session.browser ?? null,
+        browser: waitResult.session?.browser ?? null,
         cause: waitResult.browserIssue?.cause,
       },
     );
@@ -410,7 +568,9 @@ export async function handleDevUp(
   }
 
   if (foreground) {
-    io.stdout.write(`[IWSDK] Runtime ready at ${waitResult.session.localUrl}\n`);
+    io.stdout.write(
+      `[IWSDK] Runtime ready at ${waitResult.session.localUrl}\n`,
+    );
     const exit = await childExitPromise;
     if (exit.exitCode && exit.exitCode !== 0) {
       return createFailure(
@@ -444,7 +604,8 @@ export async function handleDevDown(
 ): Promise<CliSuccess<unknown>> {
   const workspaceRoot = await resolveWorkspaceRoot({
     cwd: io.cwd,
-    workspace: typeof options.workspace === 'string' ? options.workspace : undefined,
+    workspace:
+      typeof options.workspace === 'string' ? options.workspace : undefined,
     requireRunning: false,
   });
   return createSuccess(await terminateRuntimeWorkspace(workspaceRoot));
@@ -456,7 +617,8 @@ export async function handleDevRestart(
 ): Promise<CliSuccess<unknown> | CliFailure | null> {
   const workspaceRoot = await resolveWorkspaceRoot({
     cwd: io.cwd,
-    workspace: typeof options.workspace === 'string' ? options.workspace : undefined,
+    workspace:
+      typeof options.workspace === 'string' ? options.workspace : undefined,
     requireRunning: false,
   });
 
@@ -470,7 +632,8 @@ export async function handleDevLogs(
 ): Promise<CliSuccess<unknown>> {
   const workspaceRoot = await resolveWorkspaceRoot({
     cwd: io.cwd,
-    workspace: typeof options.workspace === 'string' ? options.workspace : undefined,
+    workspace:
+      typeof options.workspace === 'string' ? options.workspace : undefined,
     requireRunning: false,
   });
   const launch = await getLaunchMetadata(workspaceRoot);
@@ -499,7 +662,8 @@ export async function handleDevOpen(
 ): Promise<CliSuccess<unknown>> {
   const workspaceRoot = await resolveWorkspaceRoot({
     cwd: io.cwd,
-    workspace: typeof options.workspace === 'string' ? options.workspace : undefined,
+    workspace:
+      typeof options.workspace === 'string' ? options.workspace : undefined,
     requireRunning: true,
   });
   const session = await getRuntimeSession(workspaceRoot);
@@ -513,6 +677,7 @@ export async function handleDevOpen(
     workspaceRoot,
     opened: session.localUrl,
     browserConnected: Boolean(session.browser?.connected),
+    browserCommandReady: isRuntimeBrowserCommandReady(session),
     browser: session.browser ?? null,
   });
 }

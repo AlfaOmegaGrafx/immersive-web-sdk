@@ -9,6 +9,20 @@
 
 set -e
 
+SKIP_REFERENCE_ASSETS=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --skip-reference-assets)
+            SKIP_REFERENCE_ASSETS=1
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
 echo "🚀 Building standalone tgz packages..."
 
 # Detect CI environment and set pnpm install flags
@@ -69,6 +83,11 @@ build_leaf_packages() {
     
     for package in "${LEAF_PACKAGES[@]}"; do
         local package_dir="$PACKAGES_DIR/$package"
+
+        if [ "$package" = "reference-assets" ] && [ "$SKIP_REFERENCE_ASSETS" -eq 1 ]; then
+            echo "   ⏭️  Skipping $package (bundle/runtime warmup expects separately hosted corpus payload)"
+            continue
+        fi
         
         if [ ! -d "$package_dir" ]; then
             echo "❌ Package directory not found: $package_dir"
@@ -89,7 +108,7 @@ build_leaf_packages() {
         if pnpm run "$build_script" 2>/dev/null; then
             echo "     ✅ Build completed"
         fi
-        
+
         # Pack - this works because no workspace dependencies
         local tarball=$(pnpm pack 2>/dev/null | tail -n1)
         echo "     📦 Packed:  $tarball"

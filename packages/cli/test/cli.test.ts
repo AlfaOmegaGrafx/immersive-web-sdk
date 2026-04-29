@@ -5,22 +5,24 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import os from 'os';
-import path from 'path';
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
 import { mkdir, readFile, realpath, rm, writeFile } from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import {
+  INTERNAL_BROWSER_PROBE_METHOD,
+  IWSDK_RUNTIME_STATE_SCHEMA_VERSION,
+  type RuntimeBrowserState,
+} from '@iwsdk/cli/contract';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { WebSocketServer } from 'ws';
 import {
-  IWSDK_RUNTIME_STATE_SCHEMA_VERSION,
-  type RuntimeBrowserState,
-  type RuntimeSession,
-} from '@iwsdk/cli/contract';
-import {
+  getRuntimeSessionFilePath,
   registerRuntimeSession,
   unregisterRuntimeSession,
 } from '../src/runtime-state.js';
+import type { AiTool } from '../src/runtime-contract.js';
 
 const CLI_PATH = path.join(
   '/Users/fe1ix/Projects/webxr-dev-platform/immersive-web-sdk',
@@ -29,9 +31,24 @@ const CLI_PATH = path.join(
   'dist',
   'cli.js',
 );
+const CLI_PACKAGE_JSON_PATH = path.join(
+  '/Users/fe1ix/Projects/webxr-dev-platform/immersive-web-sdk',
+  'packages',
+  'cli',
+  'package.json',
+);
 
 const ONE_BY_ONE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlH0ZQAAAAASUVORK5CYII=';
+const REFERENCE_TEST_MODEL = {
+  source: 'archive',
+  format: 'transformers-js',
+  archiveSha256: 'model-hash',
+  archiveSize: 123,
+  dtype: 'q8',
+  pooling: 'mean',
+  normalize: true,
+};
 
 let tempDir: string;
 let appA: string;
@@ -49,12 +66,159 @@ async function createAppFixture(
   };
   packageJson.devDependencies = {
     '@iwsdk/vite-plugin-dev': 'workspace:*',
-    ...(packageJsonOverrides.devDependencies as Record<string, unknown> | undefined),
+    ...(packageJsonOverrides.devDependencies as
+      | Record<string, unknown>
+      | undefined),
   };
-  await writeFile(path.join(root, 'package.json'), `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8');
-  await writeFile(path.join(root, 'vite.config.ts'), 'export default {}\n', 'utf8');
+  await writeFile(
+    path.join(root, 'package.json'),
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+    'utf8',
+  );
+  await writeFile(
+    path.join(root, 'vite.config.ts'),
+    'export default {}\n',
+    'utf8',
+  );
   await mkdir(path.join(root, 'src'), { recursive: true });
   await writeFile(path.join(root, 'src', 'main.ts'), 'export {};\n', 'utf8');
+}
+
+async function installReferenceFixture(
+  root: string,
+  options: {
+    statusData?: Record<string, unknown>;
+    warmupData?: Record<string, unknown>;
+  } = {},
+) {
+  const normalizedRoot = await realpath(root);
+  const entrypoint = path.join(
+    root,
+    'node_modules',
+    '@iwsdk',
+    'reference',
+    'dist',
+    'cli.js',
+  );
+  await mkdir(path.dirname(entrypoint), { recursive: true });
+  const statusData = options.statusData ?? {
+    packageVersion: '0.3.1',
+    assetsPackage: {
+      name: '@iwsdk/reference-assets',
+      version: '0.3.1',
+    },
+    workspaceRoot: normalizedRoot,
+    stateRoot: path.join(normalizedRoot, '.iwsdk', 'reference'),
+    sharedDataRoot: '/tmp/reference-cache/corpora',
+    sharedModelRoot: '/tmp/reference-cache/models',
+    initState: 'not_started',
+    manifestUrl: null,
+    dataDir: null,
+    dataSha256: null,
+    modelDir: null,
+    modelSha256: null,
+    modelUrl: null,
+    model: null,
+    startedAt: null,
+    completedAt: null,
+    updatedAt: null,
+    error: null,
+    warmupRequired: true,
+  };
+  const warmupData = options.warmupData ?? {
+    ...statusData,
+    initState: 'ready',
+    warmupRequired: false,
+    dataDir: '/tmp/reference-cache/data',
+    dataSha256: 'data-hash',
+    modelDir: '/tmp/reference-cache/models/model-hash/model',
+    modelSha256: REFERENCE_TEST_MODEL.archiveSha256,
+    modelUrl: 'https://cdn.example.test/model.tgz',
+    model: REFERENCE_TEST_MODEL,
+    updatedAt: new Date().toISOString(),
+  };
+  await writeFile(
+    entrypoint,
+    `function readOption(name) {
+  const args = process.argv.slice(2);
+  const index = args.indexOf(name);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  return value && !value.startsWith('--') ? value : true;
+}
+const args = new Set(process.argv.slice(2));
+if (args.has('--status-json')) {
+  process.stdout.write(${JSON.stringify(
+    `${JSON.stringify({ ok: true, data: statusData })}\n`,
+  )});
+  process.exit(0);
+}
+if (args.has('--warmup')) {
+  process.stderr.write('warming reference assets\\n');
+  process.stdout.write(${JSON.stringify(
+    `${JSON.stringify({ ok: true, data: warmupData })}\n`,
+  )});
+  process.exit(0);
+}
+if (args.has('--inspect-json')) {
+  const tool = readOption('--tool');
+  const operations = [
+    {
+      id: 'search',
+      cliName: 'search',
+      handlerId: 'searchCode',
+      mcpName: 'search_code',
+      description: 'Search code',
+      inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+      requiresSearchService: true,
+    },
+    {
+      id: 'examples',
+      cliName: 'examples',
+      handlerId: 'findUsageExamples',
+      mcpName: 'find_usage_examples',
+      description: 'Find usage examples',
+      inputSchema: { type: 'object', properties: { api_name: { type: 'string' } }, required: ['api_name'] },
+      requiresSearchService: true,
+    },
+  ];
+  const match = tool
+    ? operations.find((entry) => entry.cliName === tool || entry.mcpName === tool)
+    : null;
+  if (tool && !match) {
+    process.stdout.write(JSON.stringify({ ok: false, error: { code: 'unknown_reference_tool', message: 'Unknown reference tool "' + tool + '"' } }) + '\\n');
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify({ ok: true, data: match ?? { operations } }) + '\\n');
+  process.exit(0);
+}
+const cliOperation = readOption('--cli-operation');
+if (typeof cliOperation === 'string') {
+  const inputJson = readOption('--input-json');
+  if (cliOperation === 'explode') {
+    process.stdout.write(JSON.stringify({ ok: false, error: { code: 'reference_query_failed', message: 'fixture exploded' } }) + '\\n');
+    process.exit(1);
+  }
+  const parsedInput = typeof inputJson === 'string' ? JSON.parse(inputJson) : {};
+  process.stdout.write(JSON.stringify({
+    ok: true,
+    data: {
+      operation: cliOperation,
+      cliName: cliOperation,
+      mcpName: cliOperation === 'search' ? 'search_code' : cliOperation,
+      result: {
+        subcommand: cliOperation,
+        input: parsedInput,
+      },
+    },
+  }) + '\\n');
+  process.exit(0);
+}
+process.stderr.write('IWSDK Reference MCP Server is ready\\n');
+setInterval(() => {}, 1000);
+`,
+    'utf8',
+  );
 }
 
 async function runCli(
@@ -88,7 +252,27 @@ async function runCli(
   });
 }
 
-async function startRuntimeFixture(workspaceRoot: string) {
+async function waitForSessionFile(
+  sessionFile: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(sessionFile)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${sessionFile}`);
+}
+
+async function startRuntimeFixture(
+  workspaceRoot: string,
+  options: {
+    aiTools?: AiTool[];
+  } = {},
+) {
+  const aiTools = options.aiTools ?? ['claude', 'cursor'];
   const server = new WebSocketServer({ port: 0 });
   await new Promise<void>((resolve) => {
     server.once('listening', () => resolve());
@@ -129,12 +313,15 @@ async function startRuntimeFixture(workspaceRoot: string) {
     port,
     localUrl: `http://localhost:${port}`,
     aiMode: 'agent',
-    aiTools: ['claude', 'cursor'],
+    aiTools,
     browser: {
       status: 'connected',
       connected: true,
+      commandReady: true,
       connectedClientCount: 1,
       lastTransitionAt: new Date().toISOString(),
+      lastBridgeConnectedAt: new Date().toISOString(),
+      lastCommandReadyAt: new Date().toISOString(),
     },
   });
 
@@ -153,6 +340,7 @@ function createBrowserState(
   return {
     status,
     connected: status === 'connected',
+    commandReady: status === 'connected',
     connectedClientCount: status === 'connected' ? 1 : 0,
     lastTransitionAt: new Date().toISOString(),
     ...overrides,
@@ -166,32 +354,48 @@ function buildManagedRuntimeScript(
     finalBrowserStatus?: RuntimeBrowserState['status'];
     finalBrowserDelayMs?: number;
     finalBrowserError?: RuntimeBrowserState['lastError'];
+    probeReadyDelayMs?: number;
   } = {},
 ): string {
   const initialBrowser = JSON.stringify(
-    createBrowserState(options.initialBrowserStatus ?? 'launching'),
+    createBrowserState(options.initialBrowserStatus ?? 'launching', {
+      commandReady: false,
+    }),
   );
-  const finalBrowser = (options.finalBrowserStatus ?? 'connected')
-    ? JSON.stringify(
-        createBrowserState(options.finalBrowserStatus ?? 'connected', {
-          ...(options.finalBrowserError
-            ? {
-                lastError: options.finalBrowserError,
-              }
-            : {}),
-        }),
-      )
-    : null;
+  const finalBrowser =
+    (options.finalBrowserStatus ?? 'connected')
+      ? JSON.stringify(
+          createBrowserState(options.finalBrowserStatus ?? 'connected', {
+            commandReady:
+              (options.finalBrowserStatus ?? 'connected') === 'connected'
+                ? false
+                : undefined,
+            ...(options.finalBrowserError
+              ? {
+                  lastError: options.finalBrowserError,
+                }
+              : {}),
+          }),
+        )
+      : null;
   const finalBrowserDelayMs = options.finalBrowserDelayMs ?? 100;
+  const probeReadyDelayMs = options.probeReadyDelayMs ?? 0;
 
   return `import http from 'node:http';
 import { realpathSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
+
+const require = createRequire(${JSON.stringify(CLI_PACKAGE_JSON_PATH)});
+const { WebSocketServer } = require('ws');
 
 const workspaceRoot = realpathSync.native(process.cwd());
 const sessionFile = path.join(workspaceRoot, '.iwsdk', 'runtime', 'session.json');
 const server = http.createServer((_, res) => res.end('ok'));
+const wss = new WebSocketServer({ server });
+let currentPort = 0;
+let currentBrowser = ${initialBrowser};
 
 async function writeSession(port, browser) {
   const now = new Date().toISOString();
@@ -213,14 +417,80 @@ async function writeSession(port, browser) {
   await writeFile(sessionFile, JSON.stringify(session, null, 2) + '\\n', 'utf8');
 }
 
+wss.on('connection', (socket) => {
+  socket.on('message', (chunk) => {
+    const request = JSON.parse(chunk.toString());
+    if (request.method !== ${JSON.stringify(INTERNAL_BROWSER_PROBE_METHOD)}) {
+      return;
+    }
+
+    if (currentBrowser.status === 'launch_failed') {
+      socket.send(
+        JSON.stringify({
+          id: request.id,
+          error: {
+            code: -32000,
+            message:
+              currentBrowser.lastError?.message ?? 'Managed browser launch failed.',
+            cause:
+              currentBrowser.lastError?.cause ?? 'browser_launch_failed',
+          },
+        }),
+      );
+      return;
+    }
+
+    if (currentBrowser.status !== 'connected') {
+      socket.send(
+        JSON.stringify({
+          id: request.id,
+          error: {
+            code: -32000,
+            message: 'Browser not ready',
+            cause: 'browser_not_ready',
+          },
+        }),
+      );
+      return;
+    }
+
+    setTimeout(async () => {
+      currentBrowser = {
+        ...currentBrowser,
+        connected: true,
+        commandReady: true,
+        connectedClientCount: 1,
+        lastTransitionAt: new Date().toISOString(),
+        lastBridgeConnectedAt:
+          currentBrowser.lastBridgeConnectedAt ?? new Date().toISOString(),
+        lastCommandReadyAt: new Date().toISOString(),
+      };
+      await writeSession(currentPort, currentBrowser);
+      socket.send(
+        JSON.stringify({
+          id: request.id,
+          result: {
+            bridgeConnected: true,
+            commandReady: true,
+            waitedForBridgeMs: ${probeReadyDelayMs},
+            browser: currentBrowser,
+          },
+        }),
+      );
+    }, ${probeReadyDelayMs});
+  });
+});
+
 server.listen(0, '127.0.0.1', async () => {
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
-  await writeSession(port, ${initialBrowser});
+  currentPort = port;
+  await writeSession(port, currentBrowser);
   ${
     finalBrowser
       ? `setTimeout(() => {
-  void writeSession(port, ${finalBrowser});
+  currentBrowser = ${finalBrowser};
+  void writeSession(port, currentBrowser);
 }, ${finalBrowserDelayMs});`
       : ''
   }
@@ -228,7 +498,7 @@ server.listen(0, '127.0.0.1', async () => {
 
 process.on('SIGTERM', async () => {
   await rm(sessionFile, { force: true }).catch(() => {});
-  server.close(() => process.exit(0));
+  wss.close(() => server.close(() => process.exit(0)));
 });
 
 setInterval(() => {}, 1000);
@@ -262,7 +532,10 @@ describe('runtime commands and project resolution', () => {
       expect(parsedStatus.data.operation).toBe('xr.status');
       expect(parsedStatus.data.result.running).toBe(true);
 
-      const screenshot = await runCli(['browser', 'screenshot'], path.join(appA, 'src'));
+      const screenshot = await runCli(
+        ['browser', 'screenshot'],
+        path.join(appA, 'src'),
+      );
       expect(screenshot.exitCode).toBe(0);
       const parsedScreenshot = JSON.parse(screenshot.stdout);
       expect(existsSync(parsedScreenshot.data.screenshotPath)).toBe(true);
@@ -304,11 +577,15 @@ describe('runtime introspection and raw output', () => {
     expect(status.exitCode).toBe(0);
     const parsed = JSON.parse(status.stdout);
     expect(parsed.data.state.browserConnected).toBe(true);
+  expect(parsed.data.state.browserCommandReady).toBe(true);
     expect(parsed.data.state.session.browser.status).toBe('connected');
   });
 
   test('inspects one runtime tool schema', async () => {
-    const inspect = await runCli(['mcp', 'inspect', '--tool', 'xr_look_at'], appA);
+    const inspect = await runCli(
+      ['mcp', 'inspect', '--tool', 'xr_look_at'],
+      appA,
+    );
     expect(inspect.exitCode).toBe(0);
     const parsed = JSON.parse(inspect.stdout);
     expect(parsed.data.tool.mcpName).toBe('xr_look_at');
@@ -335,11 +612,15 @@ describe('runtime introspection and raw output', () => {
     const runtime = await startRuntimeFixture(appA);
 
     try {
-      const xrStatus = await runCli(['xr', 'status', '--raw'], path.join(appA, 'src'));
+      const xrStatus = await runCli(
+        ['xr', 'status', '--raw'],
+        path.join(appA, 'src'),
+      );
       expect(xrStatus.exitCode).toBe(0);
       const parsedStatus = JSON.parse(xrStatus.stdout);
       expect(parsedStatus.running).toBe(true);
       expect(parsedStatus.browserConnected).toBe(true);
+      expect(parsedStatus.browserCommandReady).toBe(true);
       expect(parsedStatus.ok).toBeUndefined();
 
       const screenshot = await runCli(
@@ -358,29 +639,195 @@ describe('runtime introspection and raw output', () => {
   });
 });
 
+describe('reference commands', () => {
+  test('reports install and cache state from a nested cwd', async () => {
+    await installReferenceFixture(appA);
+
+    const result = await runCli(
+      ['reference', 'status'],
+      path.join(appA, 'src'),
+    );
+    expect(result.exitCode).toBe(0);
+
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.data.installed).toBe(true);
+    expect(parsed.data.workspaceRoot).toBe(await realpath(appA));
+    expect(parsed.data.initState).toBe('not_started');
+    expect(parsed.data.warmupRequired).toBe(true);
+  });
+
+  test('supports --workspace for reference warmup', async () => {
+    await installReferenceFixture(appA);
+
+    const result = await runCli(
+      ['reference', 'warmup', '--workspace', appA],
+      tempDir,
+    );
+    expect(result.exitCode).toBe(0);
+
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.data.workspaceRoot).toBe(await realpath(appA));
+    expect(parsed.data.initState).toBe('ready');
+    expect(parsed.data.warmupRequired).toBe(false);
+    expect(result.stderr).toContain('warming reference assets');
+  });
+
+  test('reports when reference is not installed', async () => {
+    const result = await runCli(
+      ['reference', 'status'],
+      path.join(appA, 'src'),
+    );
+    expect(result.exitCode).toBe(0);
+
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.data.installed).toBe(false);
+    expect(parsed.data.packageRoot).toBeNull();
+  });
+
+  test('inspects the reference contract through the workspace package', async () => {
+    await installReferenceFixture(appA);
+
+    const result = await runCli(
+      ['reference', 'inspect', '--tool', 'search'],
+      path.join(appA, 'src'),
+    );
+    expect(result.exitCode).toBe(0);
+
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.data.operation).toBe('inspect');
+    expect(parsed.data.result.cliName).toBe('search');
+    expect(parsed.data.result.mcpName).toBe('search_code');
+  });
+
+  test('shells out dedicated reference query subcommands', async () => {
+    await installReferenceFixture(appA);
+
+    const result = await runCli(
+      [
+        'reference',
+        'search',
+        '--input-json',
+        JSON.stringify({ query: 'player rig', limit: 2 }),
+      ],
+      path.join(appA, 'src'),
+    );
+    expect(result.exitCode).toBe(0);
+
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.data.operation).toBe('search');
+    expect(parsed.data.result).toEqual({
+      subcommand: 'search',
+      input: {
+        query: 'player rig',
+        limit: 2,
+      },
+    });
+  });
+
+  test('surfaces reference query failures with CLI failure envelopes', async () => {
+    await installReferenceFixture(appA);
+
+    const result = await runCli(
+      ['reference', 'explode'],
+      path.join(appA, 'src'),
+    );
+    expect(result.exitCode).toBe(1);
+
+    const parsed = JSON.parse(result.stderr);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe('reference_query_failed');
+    expect(parsed.error.message).toContain('fixture exploded');
+  });
+});
+
 describe('adapter management', () => {
   test('writes stable adapter configs that point to iwsdk mcp stdio without workspace args', async () => {
     const result = await runCli(['adapter', 'sync'], appA);
     expect(result.exitCode).toBe(0);
 
-    const claude = JSON.parse(await readFile(path.join(appA, '.mcp.json'), 'utf8'));
+    const claude = JSON.parse(
+      await readFile(path.join(appA, '.mcp.json'), 'utf8'),
+    );
     const cursor = JSON.parse(
       await readFile(path.join(appA, '.cursor', 'mcp.json'), 'utf8'),
     );
-    const codex = await readFile(path.join(appA, '.codex', 'config.toml'), 'utf8');
+    const codex = await readFile(
+      path.join(appA, '.codex', 'config.toml'),
+      'utf8',
+    );
     const normalizedAppA = await realpath(appA);
 
-    expect(claude.mcpServers.iwsdk.command).toBe('node');
-    expect(claude.mcpServers.iwsdk.args).toContain(
-      path.join(normalizedAppA, 'node_modules', '@iwsdk', 'cli', 'dist', 'cli.js'),
+    expect(claude.mcpServers['iwsdk-runtime'].command).toBe('node');
+    expect(claude.mcpServers['iwsdk-runtime'].args).toContain(
+      path.join(
+        normalizedAppA,
+        'node_modules',
+        '@iwsdk',
+        'cli',
+        'dist',
+        'cli.js',
+      ),
     );
-    expect(claude.mcpServers.iwsdk.args).toContain('mcp');
-    expect(claude.mcpServers.iwsdk.args).toContain('stdio');
-    expect(claude.mcpServers.iwsdk.args).not.toContain('--workspace');
-    expect(cursor.mcpServers.iwsdk.command).toBe('node');
-    expect(codex).toContain('[mcp_servers.iwsdk]');
+    expect(claude.mcpServers['iwsdk-runtime'].args).toContain('mcp');
+    expect(claude.mcpServers['iwsdk-runtime'].args).toContain('stdio');
+    expect(claude.mcpServers['iwsdk-runtime'].args).not.toContain(
+      '--workspace',
+    );
+    expect(cursor.mcpServers['iwsdk-runtime'].command).toBe('node');
+    expect(codex).toContain('[mcp_servers.iwsdk-runtime]');
     expect(codex).not.toContain('--port');
     expect(codex).not.toContain('--workspace');
+  });
+
+  test('ignores legacy-looking args on unrelated user-owned MCP entries', async () => {
+    const sync = await runCli(['adapter', 'sync'], appA);
+    expect(sync.exitCode).toBe(0);
+
+    const claudePath = path.join(appA, '.mcp.json');
+    const cursorPath = path.join(appA, '.cursor', 'mcp.json');
+    const copilotPath = path.join(appA, '.vscode', 'mcp.json');
+    const codexPath = path.join(appA, '.codex', 'config.toml');
+
+    const claude = JSON.parse(await readFile(claudePath, 'utf8'));
+    claude.mcpServers['user-owned'] = {
+      command: 'node',
+      args: ['custom.js', '--workspace', '/tmp/elsewhere'],
+    };
+    await writeFile(claudePath, `${JSON.stringify(claude, null, 2)}\n`, 'utf8');
+
+    const cursor = JSON.parse(await readFile(cursorPath, 'utf8'));
+    cursor.mcpServers['user-owned'] = {
+      command: 'node',
+      args: ['custom.js', '--workspace', '/tmp/elsewhere'],
+    };
+    await writeFile(cursorPath, `${JSON.stringify(cursor, null, 2)}\n`, 'utf8');
+
+    const copilot = JSON.parse(await readFile(copilotPath, 'utf8'));
+    copilot.servers['user-owned'] = {
+      command: 'node',
+      args: ['custom.js', '--workspace', '/tmp/elsewhere'],
+    };
+    await writeFile(copilotPath, `${JSON.stringify(copilot, null, 2)}\n`, 'utf8');
+
+    const codex = await readFile(codexPath, 'utf8');
+    await writeFile(
+      codexPath,
+      `${codex}\n[mcp_servers.user-owned]\ncommand = "node"\nargs = ["custom.js", "--workspace", "/tmp/elsewhere"]\n`,
+      'utf8',
+    );
+
+    const status = await runCli(['adapter', 'status'], appA);
+    expect(status.exitCode).toBe(0);
+    const parsedStatus = JSON.parse(status.stdout);
+    const adapterStatuses = Object.fromEntries(
+      parsedStatus.data.adapters.map(
+        (entry: { tool: string; status: string }) => [entry.tool, entry.status],
+      ),
+    );
+    expect(adapterStatuses.claude).toBe('configured');
+    expect(adapterStatuses.cursor).toBe('configured');
+    expect(adapterStatuses.copilot).toBe('configured');
+    expect(adapterStatuses.codex).toBe('configured');
   });
 
   test('works against the real starter-template app shape', async () => {
@@ -409,10 +856,14 @@ describe('adapter management', () => {
     );
     const parsedStarterPackageJson = JSON.parse(starterPackageJson);
 
-    expect(parsedStarterPackageJson.scripts.dev).toBe('iwsdk dev up --open --foreground');
+    expect(parsedStarterPackageJson.scripts.dev).toBe(
+      'iwsdk dev up --open --foreground',
+    );
     expect(parsedStarterPackageJson.scripts['dev:runtime']).toBe('vite');
     expect(parsedStarterPackageJson.scripts['dev:down']).toBe('iwsdk dev down');
-    expect(parsedStarterPackageJson.scripts['dev:status']).toBe('iwsdk dev status');
+    expect(parsedStarterPackageJson.scripts['dev:status']).toBe(
+      'iwsdk dev status',
+    );
     expect(parsedStarterPackageJson.devDependencies['@iwsdk/cli']).toContain(
       'iwsdk-cli.tgz',
     );
@@ -420,8 +871,16 @@ describe('adapter management', () => {
     expect(starterViteConfig).not.toContain('IWSDK_DEV_OPEN');
     expect(starterViteConfig).not.toContain('strictPort');
 
-    await writeFile(path.join(starterApp, 'package.json'), starterPackageJson, 'utf8');
-    await writeFile(path.join(starterApp, 'vite.config.ts'), starterViteConfig, 'utf8');
+    await writeFile(
+      path.join(starterApp, 'package.json'),
+      starterPackageJson,
+      'utf8',
+    );
+    await writeFile(
+      path.join(starterApp, 'vite.config.ts'),
+      starterViteConfig,
+      'utf8',
+    );
 
     const status = await runCli(['status'], starterApp);
     expect(status.exitCode).toBe(0);
@@ -454,7 +913,11 @@ process.exit(1);
       'utf8',
     );
 
-    await writeFile(fixtureScript, buildManagedRuntimeScript('fixture-dev-runtime'), 'utf8');
+    await writeFile(
+      fixtureScript,
+      buildManagedRuntimeScript('fixture-dev-runtime'),
+      'utf8',
+    );
 
     await createAppFixture(appA, {
       scripts: {
@@ -469,6 +932,7 @@ process.exit(1);
     expect(parsedUp.data.action).toBe('started');
     expect(parsedUp.data.session.localUrl).toContain('http://localhost:');
     expect(parsedUp.data.session.browser.status).toBe('connected');
+    expect(parsedUp.data.session.browser.commandReady).toBe(true);
     const adapterStatuses = Object.fromEntries(
       parsedUp.data.adapters.map((entry: { tool: string; status: string }) => [
         entry.tool,
@@ -485,13 +949,19 @@ process.exit(1);
     expect(typeof launch.port).toBe('number');
     expect(parsedUp.data.session.port).toBe(launch.port);
     expect(typeof parsedUp.data.logPath).toBe('string');
-    expect(String(parsedUp.data.logPath)).toContain(path.join('.iwsdk', 'runtime', 'logs'));
+    expect(String(parsedUp.data.logPath)).toContain(
+      path.join('.iwsdk', 'runtime', 'logs'),
+    );
 
-    const claude = JSON.parse(await readFile(path.join(appA, '.mcp.json'), 'utf8'));
-    expect(claude.mcpServers.iwsdk.args).toContain('mcp');
-    expect(claude.mcpServers.iwsdk.args).toContain('stdio');
-    expect(claude.mcpServers.iwsdk.args).not.toContain('--port');
-    expect(claude.mcpServers.iwsdk.args).not.toContain('--workspace');
+    const claude = JSON.parse(
+      await readFile(path.join(appA, '.mcp.json'), 'utf8'),
+    );
+    expect(claude.mcpServers['iwsdk-runtime'].args).toContain('mcp');
+    expect(claude.mcpServers['iwsdk-runtime'].args).toContain('stdio');
+    expect(claude.mcpServers['iwsdk-runtime'].args).not.toContain('--port');
+    expect(claude.mcpServers['iwsdk-runtime'].args).not.toContain(
+      '--workspace',
+    );
 
     const down = await runCli(['dev', 'down'], appA);
     expect(down.exitCode).toBe(0);
@@ -499,7 +969,11 @@ process.exit(1);
 
   test('starts, reattaches, and stops a managed dev process', async () => {
     const fixtureScript = path.join(appA, 'dev-server.mjs');
-    await writeFile(fixtureScript, buildManagedRuntimeScript('fixture-dev'), 'utf8');
+    await writeFile(
+      fixtureScript,
+      buildManagedRuntimeScript('fixture-dev'),
+      'utf8',
+    );
 
     await createAppFixture(appA, {
       scripts: {
@@ -515,6 +989,7 @@ process.exit(1);
     expect(parsedUp.data.launch.scriptName).toBe('dev:runtime');
     expect(parsedUp.data.launch.port).toBe(parsedUp.data.session.port);
     expect(parsedUp.data.session.browser.status).toBe('connected');
+    expect(parsedUp.data.session.browser.commandReady).toBe(true);
 
     const again = await runCli(['dev', 'up'], appA);
     expect(again.exitCode).toBe(0);
@@ -525,6 +1000,177 @@ process.exit(1);
     expect(down.exitCode).toBe(0);
     const parsedDown = JSON.parse(down.stdout);
     expect(parsedDown.data.stopped).toBe(true);
+  });
+
+  test('waits for browser command readiness before reporting dev up success', async () => {
+    const fixtureScript = path.join(appA, 'dev-probe-delay.mjs');
+    await writeFile(
+      fixtureScript,
+      buildManagedRuntimeScript('fixture-probe-delay', {
+        finalBrowserDelayMs: 25,
+        probeReadyDelayMs: 700,
+      }),
+      'utf8',
+    );
+
+    await createAppFixture(appA, {
+      scripts: {
+        'dev:runtime': 'node dev-probe-delay.mjs',
+      },
+    });
+
+    const startedAt = Date.now();
+    const up = await runCli(['dev', 'up', '--timeout', '15000'], appA);
+    const elapsedMs = Date.now() - startedAt;
+    expect(up.exitCode).toBe(0);
+    const parsedUp = JSON.parse(up.stdout);
+    expect(parsedUp.data.session.browser.commandReady).toBe(true);
+    expect(parsedUp.data.session.browser.lastCommandReadyAt).toEqual(
+      expect.any(String),
+    );
+    expect(elapsedMs).toBeGreaterThanOrEqual(650);
+
+    const down = await runCli(['dev', 'down'], appA);
+    expect(down.exitCode).toBe(0);
+  });
+
+  test('waits for browser command readiness when attaching to an existing runtime', async () => {
+    const fixtureScript = path.join(appA, 'dev-attach-probe-delay.mjs');
+    const sessionFile = getRuntimeSessionFilePath(appA);
+    await writeFile(
+      fixtureScript,
+      buildManagedRuntimeScript('fixture-attach-probe-delay', {
+        initialBrowserStatus: 'connected',
+        finalBrowserStatus: 'connected',
+        finalBrowserDelayMs: 0,
+        probeReadyDelayMs: 700,
+      }),
+      'utf8',
+    );
+
+    await createAppFixture(appA, {
+      scripts: {
+        'dev:runtime': 'node dev-attach-probe-delay.mjs',
+      },
+    });
+
+    const runtime = spawn('node', [fixtureScript], {
+      cwd: appA,
+      env: process.env,
+      stdio: 'ignore',
+    });
+
+    try {
+      await waitForSessionFile(sessionFile);
+      const startedAt = Date.now();
+      const up = await runCli(['dev', 'up', '--timeout', '15000'], appA);
+      const elapsedMs = Date.now() - startedAt;
+      expect(up.exitCode).toBe(0);
+      const parsedUp = JSON.parse(up.stdout);
+      expect(parsedUp.data.action).toBe('attached');
+      expect(parsedUp.data.session.browser.commandReady).toBe(true);
+      expect(parsedUp.data.session.browser.lastCommandReadyAt).toEqual(
+        expect.any(String),
+      );
+      expect(elapsedMs).toBeGreaterThanOrEqual(650);
+    } finally {
+      const down = await runCli(['dev', 'down'], appA);
+      expect(down.exitCode).toBe(0);
+      if (runtime.exitCode === null) {
+        runtime.kill('SIGKILL');
+      }
+    }
+  });
+
+  test('attaches to legacy connected runtimes that do not publish commandReady', async () => {
+    await createAppFixture(appA, {
+      scripts: {
+        'dev:runtime': 'node -e "setInterval(() => {}, 1000)"',
+      },
+    });
+
+    const keeper = spawn('node', ['-e', 'setInterval(() => {}, 1000)'], {
+      cwd: appA,
+      env: process.env,
+      stdio: 'ignore',
+    });
+    const server = new WebSocketServer({ port: 0 });
+    await new Promise<void>((resolve) => {
+      server.once('listening', () => resolve());
+    });
+
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    const sessionFile = getRuntimeSessionFilePath(appA);
+    await mkdir(path.dirname(sessionFile), { recursive: true });
+    await writeFile(
+      sessionFile,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          sessionId: 'legacy-session',
+          workspaceRoot: await realpath(appA),
+          pid: keeper.pid,
+          port,
+          localUrl: `http://localhost:${port}`,
+          networkUrls: [],
+          aiMode: 'agent',
+          aiTools: ['claude', 'cursor'],
+          browser: {
+            status: 'connected',
+            connected: true,
+            connectedClientCount: 1,
+            lastTransitionAt: new Date().toISOString(),
+          },
+          registeredAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    try {
+      const up = await runCli(['dev', 'up', '--timeout', '1500'], appA);
+      expect(up.exitCode).toBe(0);
+      const parsedUp = JSON.parse(up.stdout);
+      expect(parsedUp.data.action).toBe('attached');
+
+      const status = await runCli(['status'], appA);
+      expect(status.exitCode).toBe(0);
+      const parsedStatus = JSON.parse(status.stdout);
+      expect(parsedStatus.data.state.browserConnected).toBe(true);
+      expect(parsedStatus.data.state.browserCommandReady).toBe(true);
+    } finally {
+      await unregisterRuntimeSession(appA);
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (keeper.pid && keeper.exitCode === null) {
+        keeper.kill('SIGKILL');
+      }
+    }
+  });
+
+  test('does not sync adapters when the runtime explicitly disables AI tools', async () => {
+    const runtime = await startRuntimeFixture(appA, { aiTools: [] });
+
+    try {
+      const up = await runCli(['dev', 'up'], appA);
+      expect(up.exitCode).toBe(0);
+      const parsedUp = JSON.parse(up.stdout);
+      expect(parsedUp.data.action).toBe('attached');
+      expect(
+        parsedUp.data.adapters.every(
+          (entry: { status: string }) => entry.status === 'missing',
+        ),
+      ).toBe(true);
+      expect(existsSync(path.join(appA, '.mcp.json'))).toBe(false);
+      expect(existsSync(path.join(appA, '.cursor', 'mcp.json'))).toBe(false);
+      expect(existsSync(path.join(appA, '.vscode', 'mcp.json'))).toBe(false);
+      expect(existsSync(path.join(appA, '.codex', 'config.toml'))).toBe(false);
+    } finally {
+      await runtime.close();
+    }
   });
 
   test('fails when the managed browser reports launch_failed', async () => {
@@ -571,6 +1217,8 @@ process.exit(1);
     const up = await runCli(['dev', 'up'], appA);
     expect(up.exitCode).toBe(1);
     const parsedUp = JSON.parse(up.stderr);
-    expect(parsedUp.error.message).toContain('Missing required "dev:runtime" script');
+    expect(parsedUp.error.message).toContain(
+      'Missing required "dev:runtime" script',
+    );
   });
 });

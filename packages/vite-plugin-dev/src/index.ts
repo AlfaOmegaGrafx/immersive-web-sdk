@@ -5,13 +5,19 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { spawn, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import * as path from 'path';
+import {
+  INTERNAL_BROWSER_PROBE_METHOD,
+  type RuntimeBrowserProbeResult,
+  type RuntimeBrowserState,
+  type RuntimeIssueCause,
+  type RuntimeIssueInfo,
+} from '@iwsdk/cli/contract';
 import type { Plugin, ResolvedConfig, ViteDevServer } from 'vite';
-import { WebSocketServer } from 'ws';
-import type { WebSocket } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
+import { createUnavailableBrowserRpcError } from './browser-rpc-errors.js';
 import {
   launchManagedBrowser,
   type ManagedBrowser,
@@ -24,11 +30,6 @@ import {
   setRuntimeSessionBrowserState,
   unregisterRuntimeSession,
 } from './runtime-session.js';
-import type {
-  RuntimeBrowserState,
-  RuntimeIssueCause,
-  RuntimeIssueInfo,
-} from '@iwsdk/cli/contract';
 import type {
   DevPluginOptions,
   ProcessedDevOptions,
@@ -48,67 +49,6 @@ export type {
   SEMOptions,
   AiTool,
 } from './types.js';
-
-/**
- * Warm up the RAG MCP server by spawning it and waiting for initialization.
- * This downloads the HuggingFace embedding model if not already cached.
- * The process is killed after initialization completes.
- */
-function warmupRagMcp(ragMcpServerPath: string, verbose: boolean): void {
-  if (!existsSync(ragMcpServerPath)) {
-    if (verbose) {
-      console.log('[RAG-MCP] Server not found, skipping warmup');
-    }
-    return;
-  }
-
-  console.log('📚 RAG-MCP: Warming up (downloading model if needed)...');
-
-  const warmupProcess: ChildProcess = spawn('node', [ragMcpServerPath], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  let initialized = false;
-
-  warmupProcess.stderr?.on('data', (data: Buffer) => {
-    const output = data.toString();
-    if (verbose) {
-      // Print warmup progress
-      process.stderr.write(`[RAG-MCP Warmup] ${output}`);
-    }
-
-    // Check if initialization is complete
-    if (output.includes('IWSDK RAG MCP Server is ready')) {
-      initialized = true;
-      clearTimeout(warmupTimeout);
-      console.log('📚 RAG-MCP: Model cached successfully');
-      warmupProcess.kill('SIGTERM');
-    }
-  });
-
-  warmupProcess.on('error', (error) => {
-    if (verbose) {
-      console.error('[RAG-MCP] Warmup error:', error.message);
-    }
-  });
-
-  warmupProcess.on('exit', (code) => {
-    if (!initialized && code !== 0 && verbose) {
-      console.warn(`[RAG-MCP] Warmup process exited with code ${code}`);
-    }
-  });
-
-  // Safety timeout - kill after 5 minutes if still running
-  const warmupTimeout = setTimeout(
-    () => {
-      if (!initialized && !warmupProcess.killed) {
-        console.warn('[RAG-MCP] Warmup timeout, killing process');
-        warmupProcess.kill('SIGTERM');
-      }
-    },
-    5 * 60 * 1000,
-  );
-}
 
 /**
  * Derive internal headless / devUI / viewport settings from the AI mode.
@@ -229,11 +169,49 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
 
       // Closure-scoped state for browser auto-recovery
       let browserLaunchPromise: Promise<void> | null = null;
+      let browserCommandReadyPromise:
+        | Promise<{
+            browser: ManagedBrowser | null;
+            relaunched: boolean;
+            bridgeConnected: boolean;
+            waitedForBridgeMs: number;
+          }>
+        | null = null;
       let browserRuntimeClients: Set<WebSocket> | null = null;
       let serverShuttingDown = false;
       let browserUrl = '';
       let consecutiveFailures = 0;
+      let currentBrowserState: RuntimeBrowserState | null = null;
       const MAX_LAUNCH_FAILURES = 3;
+      const BRIDGE_READY_TIMEOUT_MS = 5000;
+      const traceEnabled = process.env.IWSDK_RUNTIME_TRACE === '1';
+      const wsConnectionIds = new WeakMap<WebSocket, string>();
+      const wsConnectionKinds = new WeakMap<WebSocket, 'command' | 'bridge'>();
+
+      const traceRuntime = (
+        event: string,
+        details: Record<string, unknown> = {},
+      ): void => {
+        if (!traceEnabled) {
+          return;
+        }
+        console.error(
+          `[IWSDK-RUNTIME-TRACE][vite] ${event} ${JSON.stringify(details)}`,
+        );
+      };
+
+      const getConnectionId = (ws: WebSocket): string =>
+        wsConnectionIds.get(ws) ?? 'unknown';
+
+      const getConnectionKind = (ws: WebSocket): 'command' | 'bridge' =>
+        wsConnectionKinds.get(ws) ?? 'command';
+
+      const markConnectionKind = (
+        ws: WebSocket,
+        kind: 'command' | 'bridge',
+      ): void => {
+        wsConnectionKinds.set(ws, kind);
+      };
 
       const createBrowserIssue = (
         cause: RuntimeIssueCause,
@@ -244,7 +222,9 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
         at: new Date().toISOString(),
       });
 
-      const classifyBrowserLaunchFailure = (message: string): RuntimeIssueCause =>
+      const classifyBrowserLaunchFailure = (
+        message: string,
+      ): RuntimeIssueCause =>
         /permission|not permitted|denied|sandbox|eacces|eperm/i.test(message)
           ? 'permission_denied'
           : 'browser_launch_failed';
@@ -253,27 +233,63 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
         status: RuntimeBrowserState['status'],
         options: {
           connected?: boolean;
+          commandReady?: boolean;
           connectedClientCount?: number;
           lastError?: RuntimeIssueInfo;
+          lastBridgeConnectedAt?: string;
+          lastCommandReadyAt?: string;
         } = {},
+        previous: RuntimeBrowserState | null = currentBrowserState,
       ): RuntimeBrowserState => {
         const connectedClientCount =
           options.connectedClientCount ?? browserRuntimeClients?.size ?? 0;
         const connected = options.connected ?? status === 'connected';
+        const commandReady = options.commandReady ?? false;
 
         return {
           status,
           connected,
+          commandReady,
           connectedClientCount,
           lastTransitionAt: new Date().toISOString(),
+          ...(options.lastBridgeConnectedAt ?? previous?.lastBridgeConnectedAt
+            ? {
+                lastBridgeConnectedAt:
+                  options.lastBridgeConnectedAt ??
+                  previous?.lastBridgeConnectedAt,
+              }
+            : {}),
+          ...(options.lastCommandReadyAt ?? previous?.lastCommandReadyAt
+            ? {
+                lastCommandReadyAt:
+                  options.lastCommandReadyAt ??
+                  previous?.lastCommandReadyAt,
+              }
+            : {}),
           ...(options.lastError ? { lastError: options.lastError } : {}),
         };
       };
 
+      currentBrowserState = createBrowserState(
+        'launching',
+        { connected: false },
+        null,
+      );
+
       const publishBrowserState = (browser: RuntimeBrowserState): void => {
-        void setRuntimeSessionBrowserState(config.root, browser).catch((error) => {
-          console.error('[IWSDK Dev] Failed to update browser state:', error);
+        currentBrowserState = browser;
+        traceRuntime('browser_state', {
+          status: browser.status,
+          bridgeConnected: browser.connected,
+          commandReady: browser.commandReady,
+          connectedClientCount: browser.connectedClientCount,
+          lastError: browser.lastError ?? null,
         });
+        void setRuntimeSessionBrowserState(config.root, browser).catch(
+          (error) => {
+            console.error('[IWSDK Dev] Failed to update browser state:', error);
+          },
+        );
       };
 
       /**
@@ -288,6 +304,10 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
 
         browserLaunchPromise = (async () => {
           publishBrowserState(createBrowserState('launching'));
+          traceRuntime('browser_launch_start', {
+            browserUrl,
+            headless: pluginOptions.ai!.headless,
+          });
           try {
             const browser = await launchManagedBrowser(
               browserUrl,
@@ -295,9 +315,13 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
               pluginOptions.verbose,
               pluginOptions.ai!.viewport,
               pluginOptions.ai!.screenshotSize,
+              traceEnabled,
             );
             managedBrowser = browser;
             consecutiveFailures = 0;
+            traceRuntime('browser_launch_success', {
+              browserRuntimeClients: browserRuntimeClients?.size ?? 0,
+            });
             publishBrowserState(
               createBrowserState(
                 (browserRuntimeClients?.size ?? 0) > 0
@@ -305,6 +329,11 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
                   : 'waiting_for_connection',
                 {
                   connected: (browserRuntimeClients?.size ?? 0) > 0,
+                  commandReady: false,
+                  lastBridgeConnectedAt:
+                    (browserRuntimeClients?.size ?? 0) > 0
+                      ? new Date().toISOString()
+                      : undefined,
                 },
               ),
             );
@@ -313,9 +342,14 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
             // relaunched lazily on the next MCP request via ensureBrowser().
             browser.onClose(() => {
               managedBrowser = null;
+              browserCommandReadyPromise = null;
+              traceRuntime('browser_closed', {
+                serverShuttingDown,
+              });
               publishBrowserState(
                 createBrowserState('disconnected', {
                   connected: false,
+                  commandReady: false,
                   lastError: createBrowserIssue(
                     'connection_lost',
                     'Managed browser closed unexpectedly. It will relaunch on the next MCP request.',
@@ -330,10 +364,16 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
             });
           } catch (error) {
             consecutiveFailures++;
-            const message = error instanceof Error ? error.message : String(error);
+            const message =
+              error instanceof Error ? error.message : String(error);
+            traceRuntime('browser_launch_failed', {
+              consecutiveFailures,
+              message,
+            });
             publishBrowserState(
               createBrowserState('launch_failed', {
                 connected: false,
+                commandReady: false,
                 lastError: createBrowserIssue(
                   classifyBrowserLaunchFailure(message),
                   message,
@@ -366,14 +406,133 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
       }> => {
         const current = managedBrowser;
         if (current && !current.isClosed()) {
+          traceRuntime('ensure_browser_reuse', {
+            browserRuntimeClients: browserRuntimeClients?.size ?? 0,
+          });
           return { browser: current, relaunched: false };
         }
         managedBrowser = null;
         if (consecutiveFailures >= MAX_LAUNCH_FAILURES) {
+          traceRuntime('ensure_browser_aborted', {
+            consecutiveFailures,
+          });
           return { browser: null, relaunched: false };
         }
         await launchBrowser();
+        traceRuntime('ensure_browser_relaunch_result', {
+          relaunched: managedBrowser !== null,
+          browserRuntimeClients: browserRuntimeClients?.size ?? 0,
+        });
         return { browser: managedBrowser, relaunched: managedBrowser !== null };
+      };
+
+      const waitForBridgeConnection = async (
+        timeoutMs: number,
+        reason: string,
+      ): Promise<number> => {
+        const startedAt = Date.now();
+        traceRuntime('bridge_wait_start', {
+          reason,
+          timeoutMs,
+          browserRuntimeClients: browserRuntimeClients?.size ?? 0,
+        });
+        while (Date.now() - startedAt < timeoutMs) {
+          if ((browserRuntimeClients?.size ?? 0) > 0) {
+            const waitedForBridgeMs = Date.now() - startedAt;
+            traceRuntime('bridge_wait_ready', {
+              reason,
+              waitedForBridgeMs,
+            });
+            return waitedForBridgeMs;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        const waitedForBridgeMs = Date.now() - startedAt;
+        traceRuntime('bridge_wait_timeout', {
+          reason,
+          waitedForBridgeMs,
+        });
+        return waitedForBridgeMs;
+      };
+
+      const ensureBrowserCommandReady = async (
+        reason: string,
+      ): Promise<{
+        browser: ManagedBrowser | null;
+        relaunched: boolean;
+        bridgeConnected: boolean;
+        waitedForBridgeMs: number;
+      }> => {
+        if (browserCommandReadyPromise) {
+          return browserCommandReadyPromise;
+        }
+
+        browserCommandReadyPromise = (async () => {
+          const { browser, relaunched } = await ensureBrowser();
+          if (!browser) {
+            return {
+              browser: null,
+              relaunched: false,
+              bridgeConnected: false,
+              waitedForBridgeMs: 0,
+            };
+          }
+
+          const needsBridgeWait =
+            relaunched ||
+            !currentBrowserState?.connected ||
+            currentBrowserState?.commandReady === false;
+          const waitedForBridgeMs = needsBridgeWait
+            ? await waitForBridgeConnection(BRIDGE_READY_TIMEOUT_MS, reason)
+            : 0;
+          const bridgeConnected = (browserRuntimeClients?.size ?? 0) > 0;
+
+          if (bridgeConnected) {
+            publishBrowserState(
+              createBrowserState('connected', {
+                connected: true,
+                commandReady: true,
+                connectedClientCount: browserRuntimeClients!.size,
+                lastBridgeConnectedAt:
+                  currentBrowserState?.lastBridgeConnectedAt ??
+                  new Date().toISOString(),
+                lastCommandReadyAt: new Date().toISOString(),
+              }),
+            );
+          } else {
+            publishBrowserState(
+              createBrowserState('waiting_for_connection', {
+                connected: false,
+                commandReady: false,
+                connectedClientCount: 0,
+                lastError: createBrowserIssue(
+                  relaunched ? 'browser_relaunched' : 'browser_not_ready',
+                  relaunched
+                    ? 'Browser relaunched and is waiting for the runtime bridge to reconnect.'
+                    : 'Managed browser bridge has not connected yet.',
+                ),
+              }),
+            );
+          }
+
+          traceRuntime('browser_command_ready_result', {
+            reason,
+            relaunched,
+            bridgeConnected,
+            waitedForBridgeMs,
+          });
+
+          return {
+            browser,
+            relaunched,
+            bridgeConnected,
+            waitedForBridgeMs,
+          };
+        })().finally(() => {
+          browserCommandReadyPromise = null;
+        });
+
+        return browserCommandReadyPromise;
       };
 
       // Initialize WebSocket server and client tracking
@@ -392,8 +551,93 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
       }, 60000);
       relayCleanupInterval.unref();
 
+      const BROWSER_RELAUNCHED_RESULT = {
+        status: 'browser_relaunched',
+        message:
+          'Browser was closed and has been relaunched. ' +
+          'The page state has been reset — please retry your request.',
+      };
+
+      const sendWsJson = (
+        ws: WebSocket,
+        payload: Record<string, unknown>,
+        context: string,
+      ): void => {
+        if (ws.readyState !== WebSocket.OPEN) {
+          traceRuntime('ws_send_skipped', {
+            connectionId: getConnectionId(ws),
+            kind: getConnectionKind(ws),
+            context,
+            readyState: ws.readyState,
+          });
+          return;
+        }
+        traceRuntime('ws_send', {
+          connectionId: getConnectionId(ws),
+          kind: getConnectionKind(ws),
+          context,
+          id: payload.id ?? null,
+        });
+        ws.send(JSON.stringify(payload));
+      };
+
+      const sendUnavailableBrowser = (
+        ws: WebSocket,
+        requestId: string,
+        context: string,
+      ): void => {
+        sendWsJson(
+          ws,
+          {
+            id: requestId,
+            error: createUnavailableBrowserRpcError(currentBrowserState),
+          },
+          context,
+        );
+      };
+
+      const sendInternalError = (
+        ws: WebSocket,
+        requestId: string,
+        error: unknown,
+        context: string,
+      ): void => {
+        sendWsJson(
+          ws,
+          {
+            id: requestId,
+            error: {
+              code: -32000,
+              message: error instanceof Error ? error.message : String(error),
+            },
+          },
+          context,
+        );
+      };
+
+      const createBrowserProbeResult = (
+        waitedForBridgeMs: number,
+      ): RuntimeBrowserProbeResult => ({
+        bridgeConnected: Boolean(currentBrowserState?.connected),
+        commandReady: Boolean(currentBrowserState?.commandReady),
+        waitedForBridgeMs,
+        browser:
+          currentBrowserState ??
+          createBrowserState('launching', {
+            connected: false,
+            commandReady: false,
+          }),
+      });
+
       mcpWss.on('connection', (ws: WebSocket) => {
+        const connectionId = randomUUID();
+        wsConnectionIds.set(ws, connectionId);
+        markConnectionKind(ws, 'command');
         mcpClients!.add(ws);
+        traceRuntime('ws_connected', {
+          connectionId,
+          kind: getConnectionKind(ws),
+        });
 
         if (pluginOptions.verbose) {
           console.log('[IWSDK-MCP] Client connected');
@@ -401,6 +645,11 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
 
         ws.on('message', async (data: Buffer) => {
           const message = data.toString();
+          traceRuntime('ws_message', {
+            connectionId,
+            kind: getConnectionKind(ws),
+            bytes: data.length,
+          });
           if (pluginOptions.verbose) {
             console.log(
               '[IWSDK-MCP] Message received:',
@@ -408,97 +657,165 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
             );
           }
 
-          // Intercept server-side tools that use Playwright directly.
-          // These respond from the Node process without a browser round-trip.
           let intercepted = false;
           try {
-            const parsed = JSON.parse(message);
+            const parsed = JSON.parse(message) as {
+              id?: string;
+              method?: string;
+              params?: Record<string, unknown>;
+              type?: string;
+              tabId?: string;
+              tabGeneration?: number;
+            };
 
             if (parsed?.type === 'iwsdk_browser_hello') {
               intercepted = true;
+              markConnectionKind(ws, 'bridge');
               if (!browserRuntimeClients!.has(ws)) {
                 browserRuntimeClients!.add(ws);
                 publishBrowserState(
                   createBrowserState('connected', {
                     connected: true,
+                    commandReady: false,
                     connectedClientCount: browserRuntimeClients!.size,
+                    lastBridgeConnectedAt: new Date().toISOString(),
                   }),
                 );
+              }
+              traceRuntime('bridge_hello', {
+                connectionId,
+                tabId: parsed.tabId ?? null,
+                tabGeneration: parsed.tabGeneration ?? null,
+                connectedClientCount: browserRuntimeClients!.size,
+              });
+              return;
+            }
+
+            if (
+              parsed.method === INTERNAL_BROWSER_PROBE_METHOD &&
+              typeof parsed.id === 'string'
+            ) {
+              intercepted = true;
+              traceRuntime('probe_request', {
+                connectionId,
+                requestId: parsed.id,
+              });
+              try {
+                const readiness =
+                  await ensureBrowserCommandReady('internal_browser_probe');
+                if (!readiness.browser || !readiness.bridgeConnected) {
+                  sendUnavailableBrowser(ws, parsed.id, 'probe_unavailable');
+                } else {
+                  sendWsJson(
+                    ws,
+                    {
+                      id: parsed.id,
+                      result: createBrowserProbeResult(
+                        readiness.waitedForBridgeMs,
+                      ),
+                    },
+                    'probe_ready',
+                  );
+                }
+              } catch (error) {
+                sendInternalError(ws, parsed.id, error, 'probe_error');
               }
               return;
             }
 
-            const BROWSER_RELAUNCHED_RESULT = {
-              status: 'browser_relaunched',
-              message:
-                'Browser was closed and has been relaunched. ' +
-                'The page state has been reset — please retry your request.',
-            };
-
-            // Console logs: Playwright captures via CDP
-            if (parsed.method === 'get_console_logs' && parsed.id) {
+            if (parsed.method === 'get_console_logs' && typeof parsed.id === 'string') {
               intercepted = true;
-              const { browser, relaunched } = await ensureBrowser();
-              if (relaunched) {
-                ws.send(
-                  JSON.stringify({
-                    id: parsed.id,
-                    result: BROWSER_RELAUNCHED_RESULT,
-                  }),
-                );
-              } else {
+              try {
+                const readiness =
+                  await ensureBrowserCommandReady('get_console_logs');
+                if (!readiness.browser || !readiness.bridgeConnected) {
+                  sendUnavailableBrowser(ws, parsed.id, 'console_logs_unavailable');
+                  return;
+                }
+                if (readiness.relaunched) {
+                  const tab = await readiness.browser.getTabMetadata();
+                  sendWsJson(
+                    ws,
+                    {
+                      id: parsed.id,
+                      result: BROWSER_RELAUNCHED_RESULT,
+                      ...(tab.id
+                        ? {
+                            _tabId: tab.id,
+                            _tabGeneration: tab.generation ?? undefined,
+                          }
+                        : {}),
+                    },
+                    'console_logs_relaunched',
+                  );
+                  return;
+                }
                 const params = parsed.params ?? {};
                 if (!params.level) {
                   params.level = ['log', 'info', 'warn', 'error'];
                 }
-                const result = browser ? browser.queryLogs(params) : [];
-                ws.send(JSON.stringify({ id: parsed.id, result }));
+                const tab = await readiness.browser.getTabMetadata();
+                sendWsJson(
+                  ws,
+                  {
+                    id: parsed.id,
+                    result: readiness.browser.queryLogs(params),
+                    ...(tab.id
+                      ? {
+                          _tabId: tab.id,
+                          _tabGeneration: tab.generation ?? undefined,
+                        }
+                      : {}),
+                  },
+                  'console_logs_result',
+                );
+              } catch (error) {
+                sendInternalError(ws, parsed.id, error, 'console_logs_error');
               }
+              return;
             }
 
-            // Screenshot: Playwright captures via CDP compositor
-            if (!intercepted && parsed.method === 'screenshot' && parsed.id) {
+            if (parsed.method === 'screenshot' && typeof parsed.id === 'string') {
               intercepted = true;
               try {
-                const { browser, relaunched } = await ensureBrowser();
-                if (relaunched) {
-                  ws.send(
-                    JSON.stringify({
+                const readiness = await ensureBrowserCommandReady('screenshot');
+                if (!readiness.browser || !readiness.bridgeConnected) {
+                  sendUnavailableBrowser(ws, parsed.id, 'screenshot_unavailable');
+                  return;
+                }
+                if (readiness.relaunched) {
+                  sendWsJson(
+                    ws,
+                    {
                       id: parsed.id,
                       result: BROWSER_RELAUNCHED_RESULT,
-                    }),
-                  );
-                } else if (browser) {
-                  const buffer = await browser.screenshot();
-                  const base64 = buffer.toString('base64');
-                  ws.send(
-                    JSON.stringify({
-                      id: parsed.id,
-                      result: { imageData: base64, mimeType: 'image/png' },
-                    }),
-                  );
-                } else {
-                  ws.send(
-                    JSON.stringify({
-                      id: parsed.id,
-                      error: { code: -32000, message: 'Browser not ready' },
-                    }),
-                  );
-                }
-              } catch (err) {
-                ws.send(
-                  JSON.stringify({
-                    id: parsed.id,
-                    error: {
-                      code: -32000,
-                      message: err instanceof Error ? err.message : String(err),
                     },
-                  }),
+                    'screenshot_relaunched',
+                  );
+                  return;
+                }
+                const buffer = await readiness.browser.screenshot();
+                const base64 = buffer.toString('base64');
+                sendWsJson(
+                  ws,
+                  {
+                    id: parsed.id,
+                    result: { imageData: base64, mimeType: 'image/png' },
+                  },
+                  'screenshot_result',
                 );
+              } catch (error) {
+                sendInternalError(ws, parsed.id, error, 'screenshot_error');
               }
+              return;
             }
-          } catch {
-            // Not JSON — fall through to relay
+          } catch (error) {
+            traceRuntime('ws_message_parse_fallthrough', {
+              connectionId,
+              kind: getConnectionKind(ws),
+              message:
+                error instanceof Error ? error.message : 'non_json_message',
+            });
           }
 
           if (!intercepted) {
@@ -506,14 +823,22 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
           }
         });
 
-        ws.on('close', () => {
+        ws.on('close', (code, reasonBuffer) => {
+          const kind = getConnectionKind(ws);
+          const reason =
+            typeof reasonBuffer === 'string'
+              ? reasonBuffer
+              : reasonBuffer.toString('utf8');
           mcpClients!.delete(ws);
-          if (browserRuntimeClients!.delete(ws)) {
+          const removedBridge = browserRuntimeClients!.delete(ws);
+          if (removedBridge) {
+            browserCommandReadyPromise = null;
             publishBrowserState(
               createBrowserState(
                 browserRuntimeClients!.size > 0 ? 'connected' : 'disconnected',
                 {
                   connected: browserRuntimeClients!.size > 0,
+                  commandReady: false,
                   connectedClientCount: browserRuntimeClients!.size,
                   lastError:
                     browserRuntimeClients!.size > 0
@@ -526,12 +851,25 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
               ),
             );
           }
+          traceRuntime('ws_closed', {
+            connectionId,
+            kind,
+            code,
+            reason,
+            removedBridge,
+            browserRuntimeClients: browserRuntimeClients!.size,
+          });
           if (pluginOptions.verbose) {
             console.log('[IWSDK-MCP] Client disconnected');
           }
         });
 
         ws.on('error', (error) => {
+          traceRuntime('ws_error', {
+            connectionId,
+            kind: getConnectionKind(ws),
+            message: error instanceof Error ? error.message : String(error),
+          });
           if (pluginOptions.verbose) {
             console.error('[IWSDK-MCP] WebSocket error:', error);
           }
@@ -544,6 +882,10 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
           return;
         }
 
+        traceRuntime('ws_upgrade', {
+          url: request.url,
+          remoteAddress: request.socket.remoteAddress ?? null,
+        });
         if (pluginOptions.verbose) {
           console.log('[IWSDK-MCP] WebSocket upgrade request received');
         }
@@ -561,16 +903,6 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
 
       // Register the project-local runtime session after server start.
       // Waiting for 'listening' lets us record Vite's actual chosen port.
-
-      // Find the path to the RAG MCP server
-      const ragMcpServerPath = path.join(
-        config.root,
-        'node_modules',
-        '@felixtz',
-        'iwsdk-rag-mcp',
-        'dist',
-        'index.js',
-      );
 
       // Resolve IWSDK version for telemetry attribution
       let iwsdkVersion: string | undefined;
@@ -612,10 +944,13 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
             networkUrls: server.resolvedUrls?.network ?? [],
             aiMode: pluginOptions.ai?.mode,
             aiTools: pluginOptions.ai?.tools ?? [],
-            browser: createBrowserState('launching', { connected: false }),
+            browser: currentBrowserState ?? undefined,
           });
         } catch (error) {
-          console.error('[IWSDK Dev] Failed to register runtime session:', error);
+          console.error(
+            '[IWSDK Dev] Failed to register runtime session:',
+            error,
+          );
         }
 
         // Report session start to hzdb telemetry (fire-and-forget via npx)
@@ -624,10 +959,6 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
           clientVersion: iwsdkVersion,
           port: actualPort,
         });
-
-        // Warm up RAG MCP server (downloads embedding model if needed)
-        // This ensures the model is cached before Claude Code tries to use it
-        warmupRagMcp(ragMcpServerPath, pluginOptions.verbose);
 
         // Launch Playwright-managed browser
         launchBrowser();

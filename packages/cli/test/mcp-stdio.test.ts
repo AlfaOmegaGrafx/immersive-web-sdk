@@ -5,14 +5,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import { mkdir, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { mkdir, rm, writeFile } from 'fs/promises';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { type RuntimeBrowserState } from '@iwsdk/cli/contract';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { WebSocketServer } from 'ws';
-import { type RuntimeBrowserState } from '@iwsdk/cli/contract';
 import {
   registerRuntimeSession,
   unregisterRuntimeSession,
@@ -67,7 +67,11 @@ async function createAppFixture(root: string) {
     ) + '\n',
     'utf8',
   );
-  await writeFile(path.join(root, 'vite.config.ts'), 'export default {}\n', 'utf8');
+  await writeFile(
+    path.join(root, 'vite.config.ts'),
+    'export default {}\n',
+    'utf8',
+  );
   await mkdir(path.join(root, 'src'), { recursive: true });
   await writeFile(path.join(root, 'src', 'main.ts'), 'export {};\n', 'utf8');
 }
@@ -78,6 +82,7 @@ function createBrowserState(
   return {
     status,
     connected: status === 'connected',
+    commandReady: status === 'connected',
     connectedClientCount: status === 'connected' ? 1 : 0,
     lastTransitionAt: new Date().toISOString(),
   };
@@ -102,7 +107,10 @@ async function startRuntimeFixture(
         method: string;
         params?: unknown;
       };
-      const response = handler({ method: request.method, params: request.params });
+      const response = handler({
+        method: request.method,
+        params: request.params,
+      });
       socket.send(
         JSON.stringify({
           id: request.id,
@@ -213,13 +221,12 @@ describe('mcp stdio interface shaping', () => {
     }
   });
 
-  test('emits a warning when the active tab changes', async () => {
+  test('emits a warning when the active tab reloads', async () => {
     let currentTabId = 'tab-1';
     let currentGeneration = 1;
 
     const runtime = await startRuntimeFixture(appRoot, ({ method }) => {
       if (method === 'reload_page') {
-        currentTabId = 'tab-2';
         currentGeneration = 2;
         return {
           result: { reloaded: true },
@@ -249,10 +256,10 @@ describe('mcp stdio interface shaping', () => {
       });
       expect(reloaded.isError).not.toBe(true);
       expect(reloaded.content[0]?.type).toBe('text');
-      expect(reloaded.content[0]?.text).toContain('Active browser tab changed');
+      expect(reloaded.content[0]?.text).toContain('Active browser tab reloaded');
       expect(JSON.parse(reloaded.content[1]?.text ?? '')).toMatchObject({
         reloaded: true,
-        _tab: { id: 'tab-2', generation: 2 },
+        _tab: { id: 'tab-1', generation: 2 },
       });
     } finally {
       await mcp.close();
@@ -336,10 +343,56 @@ describe('mcp stdio interface shaping', () => {
         browser: {
           status: 'connected',
           connected: true,
+          commandReady: true,
           connectedClientCount: 1,
         },
       });
       expect(typeof payload.browser.lastTransitionAt).toBe('string');
+    } finally {
+      await mcp.close();
+      await runtime.close();
+    }
+  });
+
+  test('surfaces unavailable-browser errors for console log requests', async () => {
+    const runtime = await startRuntimeFixture(appRoot, ({ method }) => {
+      if (method === 'get_console_logs') {
+        return {
+          error: {
+            message: 'Playwright sandbox denied',
+            cause: 'permission_denied',
+          },
+          _tabId: 'tab-1',
+          _tabGeneration: 1,
+        };
+      }
+
+      return {
+        result: { ok: true },
+        _tabId: 'tab-1',
+        _tabGeneration: 1,
+      };
+    });
+    const mcp = await connectMcpClient(appRoot);
+
+    try {
+      const result = await mcp.client.callTool({
+        name: 'browser_get_console_logs',
+        arguments: { count: 5 },
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+        message: 'Playwright sandbox denied',
+        cause: 'permission_denied',
+        browser: {
+          status: 'connected',
+          connected: true,
+          commandReady: true,
+          connectedClientCount: 1,
+        },
+      });
     } finally {
       await mcp.close();
       await runtime.close();

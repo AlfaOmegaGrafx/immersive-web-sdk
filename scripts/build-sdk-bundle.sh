@@ -10,6 +10,8 @@
 #   - docs/      → prebuilt static docs with a tiny local server script
 #
 # This is intended for sharing an early build of the SDK without publishing to npm.
+# Reference corpus artifacts still need separate hosting:
+#   - `packages/reference-assets/dist/`
 # Consumers can:
 #   - cd starter && npm install && npm run dev
 #   - cd ../docs && npm run serve (serves the static docs)
@@ -32,7 +34,7 @@ mkdir -p "$BUNDLE_PKGS"
 ##############################################
 # 1) Build .tgz tarballs for all packages
 ##############################################
-"$BASE_DIR/scripts/build-tgz.sh"
+"$BASE_DIR/scripts/build-tgz.sh" --skip-reference-assets
 
 echo "📦 Staging tarballs into $BUNDLE_PKGS ..."
 # Collect all produced tgz files under packages/*/*.tgz
@@ -45,6 +47,10 @@ OLDIFS=$IFS; IFS=$'\n'
 for TGZ in $TGZS; do
   REL=${TGZ#${PACKAGES_DIR}/}
   PKG_DIR=${REL%%/*}
+  if [ "$PKG_DIR" = "reference-assets" ]; then
+    echo "   ⏭️  Skipping $(basename "$TGZ") (CDN warmup payload)"
+    continue
+  fi
   mkdir -p "$BUNDLE_PKGS/$PKG_DIR"
   cp -f "$TGZ" "$BUNDLE_PKGS/$PKG_DIR/"
   echo "   ➕ $(basename "$TGZ") → sdk-bundle/packages/$PKG_DIR/"
@@ -153,7 +159,7 @@ PKG
 cat > "$BUNDLE_ROOT/README.md" << 'README'
 # Immersive Web SDK – Local Bundle
 
-This folder contains a self‑contained SDK bundle for local evaluation.
+This folder contains an SDK bundle for local evaluation.
 
 Structure:
 - packages/ – .tgz packages of the SDK (including @iwsdk/create)
@@ -167,6 +173,9 @@ Serve the Docs (independent of CLI):
 
 Notes:
 - The generated starter apps will install dependencies from the tarballs in ./packages via local `file:` paths.
+- `@iwsdk/reference` still needs a separately hosted corpus payload.
+- Host `packages/reference-assets/dist/` yourself unless you are relying on the published corpus package.
+- The reference model file URLs are baked into the SDK; `npx iwsdk reference warmup` will fetch them automatically and still requires access to those public URLs unless the shared cache is pre-warmed.
 README
 
 echo "🎁 Bundle ready at: $BUNDLE_ROOT"

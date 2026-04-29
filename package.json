@@ -27,7 +27,8 @@
     "three:check": "node scripts/check-three-version.mjs",
     "test:canonical-mcp-surface": "node scripts/check-canonical-mcp-surface.mjs",
     "test:cli-mcp-parity": "node scripts/verify-cli-mcp-parity.mjs",
-    "test:reference-cli-mcp-parity": "node scripts/verify-reference-cli-mcp-parity.mjs"
+    "test:reference-cli-mcp-parity": "node scripts/verify-reference-cli-mcp-parity.mjs",
+    "test:mcp-parity": "pnpm test:cli-mcp-parity && pnpm test:reference-cli-mcp-parity"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [

@@ -1,10 +1,16 @@
+import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
-import { createReadStream, createWriteStream, existsSync } from 'fs';
+import {
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  readFileSync,
+} from 'fs';
 import { mkdir, rename, rm, stat } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import * as tar from 'tar';
+import { fileURLToPath } from 'url';
 
 export type ReferenceEmbeddingModelDType =
   | 'auto'
@@ -27,34 +33,231 @@ export interface ReferenceEmbeddingModelMetadata {
   normalize: true;
 }
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const contractPath = path.resolve(
+  __dirname,
+  path.basename(path.dirname(__dirname)) === 'dist-tools'
+    ? path.join('..', '..', '..', 'reference', 'src', 'model-contract.json')
+    : path.join('..', '..', 'reference', 'src', 'model-contract.json'),
+);
+const modelContract = JSON.parse(readFileSync(contractPath, 'utf8')) as {
+  source: ReferenceEmbeddingModelMetadata['source'];
+  format: ReferenceEmbeddingModelMetadata['format'];
+  repoId: string;
+  revision: string;
+  dtype: ReferenceEmbeddingModelMetadata['dtype'];
+  pooling: ReferenceEmbeddingModelMetadata['pooling'];
+  normalize: ReferenceEmbeddingModelMetadata['normalize'];
+  files: Array<{
+    relativePath: string;
+    sourceUrl: string;
+  }>;
+};
+const REFERENCE_MODEL_ONNX_PATH = 'onnx/model_quantized.onnx';
+
+export const REFERENCE_MODEL_REPO_ID = modelContract.repoId;
+export const REFERENCE_MODEL_REVISION = modelContract.revision;
+export const REFERENCE_MODEL_FILE_SOURCES = Object.freeze(
+  modelContract.files.map((file) => ({
+    relativePath: file.relativePath,
+    sourceUrl: file.sourceUrl,
+  })),
+);
+export const REFERENCE_MODEL_ONNX_URL =
+  REFERENCE_MODEL_FILE_SOURCES.find(
+    (file) => file.relativePath === REFERENCE_MODEL_ONNX_PATH,
+  )?.sourceUrl ?? '';
+const DEFAULT_REFERENCE_MODEL_SETTINGS = Object.freeze({
+  source: modelContract.source,
+  format: modelContract.format,
+  dtype: modelContract.dtype,
+  pooling: modelContract.pooling,
+  normalize: modelContract.normalize,
+});
+const REQUIRED_MODEL_FILES = Object.freeze(
+  REFERENCE_MODEL_FILE_SOURCES.map((file) => file.relativePath),
+);
+
+function buildReferenceEmbeddingModelMetadata(
+  archiveSha256: string,
+  archiveSize: number,
+): ReferenceEmbeddingModelMetadata {
+  return {
+    ...DEFAULT_REFERENCE_MODEL_SETTINGS,
+    archiveSha256,
+    archiveSize,
+  };
+}
+
+export function formatReferenceEmbeddingModel(
+  model: ReferenceEmbeddingModelMetadata,
+): string {
+  return `sha256:${model.archiveSha256}`;
+}
+
+export function hasReferenceEmbeddingModelFiles(
+  modelDir: string | null,
+): boolean {
+  if (!modelDir) {
+    return false;
+  }
+
+  return REQUIRED_MODEL_FILES.every((relativePath) =>
+    existsSync(path.join(modelDir, relativePath)),
+  );
+}
+
+async function writeResponseToFile(
+  response: Response,
+  destination: string,
+  sourceUrl: string,
+): Promise<void> {
+  if (!response.body) {
+    throw new Error(`No response body received from ${sourceUrl}`);
+  }
+
+  const fileStream = createWriteStream(destination);
+  const reader = response.body.getReader();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      const chunk = Buffer.from(value);
+      if (!fileStream.write(chunk)) {
+        await new Promise<void>((resolve) => fileStream.once('drain', resolve));
+      }
+    }
+
+    fileStream.end();
+    await new Promise<void>((resolve, reject) => {
+      fileStream.once('finish', resolve);
+      fileStream.once('error', reject);
+    });
+  } catch (error) {
+    fileStream.destroy();
+    throw error;
+  }
+}
+
+async function sha256File(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+async function downloadPinnedModelFile(
+  sourceUrl: string,
+  destination: string,
+  expected: {
+    sha256?: string;
+    size?: number;
+  } = {},
+): Promise<void> {
+  await mkdir(path.dirname(destination), { recursive: true });
+
+  try {
+    const response = await fetch(sourceUrl);
+    if (!response.ok) {
+      throw new Error(`Unable to fetch ${sourceUrl}: HTTP ${response.status}`);
+    }
+    await writeResponseToFile(response, destination, sourceUrl);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith(`Unable to fetch ${sourceUrl}: HTTP `)
+    ) {
+      throw error;
+    }
+    await rm(destination, { force: true }).catch(() => {});
+    const curlResult = spawnSync(
+      'curl',
+      ['-L', '--fail', '--silent', '--show-error', sourceUrl, '--output', destination],
+      {
+        encoding: 'utf8',
+      },
+    );
+    if (curlResult.status !== 0) {
+      throw new Error(
+        `Unable to fetch ${sourceUrl}: ${
+          curlResult.stderr?.trim() ||
+          (error instanceof Error ? error.message : String(error))
+        }`,
+      );
+    }
+  }
+
+  const downloaded = await stat(destination);
+  if (
+    typeof expected.size === 'number' &&
+    Number.isFinite(expected.size) &&
+    downloaded.size !== expected.size
+  ) {
+    throw new Error(
+      `Size mismatch for ${sourceUrl}: expected ${expected.size}, got ${downloaded.size}`,
+    );
+  }
+  if (expected.sha256) {
+    const actualSha = await sha256File(destination);
+    if (actualSha !== expected.sha256) {
+      throw new Error(
+        `Checksum mismatch for ${sourceUrl}: expected ${expected.sha256}, got ${actualSha}`,
+      );
+    }
+  }
+}
+
+async function createDeterministicModelArchive(
+  sourceDir: string,
+  archivePath: string,
+): Promise<void> {
+  await tar.c(
+    {
+      cwd: path.dirname(sourceDir),
+      file: archivePath,
+      gzip: true,
+      portable: true,
+      noPax: true,
+      mtime: new Date(0),
+    },
+    [path.basename(sourceDir)],
+  );
+}
+
+async function readInstalledModelMetadata(
+  modelDir: string,
+  stagingRoot = getReferenceModelStagingRoot(),
+): Promise<ReferenceEmbeddingModelMetadata> {
+  const archivePath = path.join(
+    stagingRoot,
+    'verification',
+    `model-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tgz`,
+  );
+  await mkdir(path.dirname(archivePath), { recursive: true });
+
+  try {
+    await createDeterministicModelArchive(modelDir, archivePath);
+    const archiveStat = await stat(archivePath);
+    return buildReferenceEmbeddingModelMetadata(
+      await sha256File(archivePath),
+      archiveStat.size,
+    );
+  } finally {
+    await rm(archivePath, { force: true }).catch(() => {});
+  }
+}
+
 export interface InstalledReferenceEmbeddingModel {
   metadata: ReferenceEmbeddingModelMetadata;
   modelDir: string;
   sourceUrl: string;
-}
-
-const REQUIRED_MODEL_FILES = [
-  'config.json',
-  'tokenizer.json',
-  'tokenizer_config.json',
-  path.join('onnx', 'model_quantized.onnx'),
-] as const;
-
-const DEFAULT_REFERENCE_MODEL_SETTINGS = {
-  source: 'archive',
-  format: 'transformers-js',
-  dtype: 'q8',
-  pooling: 'mean',
-  normalize: true,
-} as const;
-
-const PACKAGE_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-);
-
-function trimTrailingSlash(value: string): string {
-  return value.endsWith('/') ? value.slice(0, -1) : value;
 }
 
 function getDefaultSharedCacheRoot(): string {
@@ -94,114 +297,10 @@ function getReferenceModelStagingRoot(
   return path.join(sharedRoot, 'staging', 'reference-assets-model');
 }
 
-export function getReferenceModelUrl(): string | null {
-  const override = process.env.IWSDK_REFERENCE_MODEL_URL?.trim();
-  return override ? override : null;
-}
-
-export function getReferenceBundledModelSourceDir(): string {
-  return path.join(PACKAGE_ROOT, 'model');
-}
-
-export function getReferenceModelOutputRoot(): string {
-  return path.join(PACKAGE_ROOT, 'model-dist');
-}
-
-function buildReferenceEmbeddingModelMetadata(
-  archiveSha256: string,
-  archiveSize: number,
-): ReferenceEmbeddingModelMetadata {
-  return {
-    ...DEFAULT_REFERENCE_MODEL_SETTINGS,
-    archiveSha256,
-    archiveSize,
-  };
-}
-
-export function formatReferenceEmbeddingModel(
-  model: ReferenceEmbeddingModelMetadata,
-): string {
-  return `sha256:${model.archiveSha256}`;
-}
-
-export function hasReferenceEmbeddingModelFiles(
-  modelDir: string | null,
-): boolean {
-  if (!modelDir) {
-    return false;
-  }
-
-  return REQUIRED_MODEL_FILES.every((relativePath) =>
-    existsSync(path.join(modelDir, relativePath)),
-  );
-}
-
-async function sha256File(filePath: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const hash = createHash('sha256');
-    const stream = createReadStream(filePath);
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('error', reject);
-    stream.on('end', () => resolve(hash.digest('hex')));
-  });
-}
-
-async function writeResponseToFile(
-  response: Response,
-  destination: string,
-  sourceUrl: string,
-): Promise<void> {
-  if (!response.body) {
-    throw new Error(`No response body received from ${sourceUrl}`);
-  }
-
-  const fileStream = createWriteStream(destination);
-  const reader = response.body.getReader();
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      const chunk = Buffer.from(value);
-      if (!fileStream.write(chunk)) {
-        await new Promise<void>((resolve) => fileStream.once('drain', resolve));
-      }
-    }
-
-    fileStream.end();
-    await new Promise<void>((resolve, reject) => {
-      fileStream.once('finish', resolve);
-      fileStream.once('error', reject);
-    });
-  } catch (error) {
-    fileStream.destroy();
-    throw error;
-  }
-}
-
-async function downloadReferenceModelArchive(
-  sourceUrl: string,
-  destination: string,
-): Promise<ReferenceEmbeddingModelMetadata> {
-  const response = await fetch(sourceUrl);
-  if (!response.ok) {
-    throw new Error(`Unable to fetch ${sourceUrl}: HTTP ${response.status}`);
-  }
-
-  await writeResponseToFile(response, destination, sourceUrl);
-  const archiveStat = await stat(destination);
-  return buildReferenceEmbeddingModelMetadata(
-    await sha256File(destination),
-    archiveStat.size,
-  );
-}
-
-async function installExtractedModel(
-  archivePath: string,
+async function installReferenceModelFiles(
   metadata: ReferenceEmbeddingModelMetadata,
+  stagingRoot: string,
+  extractedDir: string,
   sharedRoot = getReferenceSharedCacheRoot(),
 ): Promise<string> {
   const finalRoot = path.join(
@@ -210,28 +309,24 @@ async function installExtractedModel(
   );
   const finalDir = path.join(finalRoot, 'model');
   if (hasReferenceEmbeddingModelFiles(finalDir)) {
-    return finalDir;
+    const installedMetadata = await readInstalledModelMetadata(finalDir);
+    if (
+      installedMetadata.archiveSha256 === metadata.archiveSha256 &&
+      installedMetadata.archiveSize === metadata.archiveSize
+    ) {
+      return finalDir;
+    }
+    await rm(finalRoot, { recursive: true, force: true });
   }
 
-  const extractRoot = `${archivePath}.extract`;
-  await rm(extractRoot, { recursive: true, force: true });
-  await mkdir(extractRoot, { recursive: true });
-  await tar.x({
-    file: archivePath,
-    cwd: extractRoot,
-  });
-
-  const extractedDir = path.join(extractRoot, 'model');
   if (!hasReferenceEmbeddingModelFiles(extractedDir)) {
-    throw new Error(
-      'Extracted model archive is missing expected files. Ensure IWSDK_REFERENCE_MODEL_URL points at a valid model.tgz built from packages/reference-assets/model.',
-    );
+    throw new Error('Pinned reference model files are incomplete after download.');
   }
 
   await mkdir(path.dirname(finalRoot), { recursive: true });
   const tempFinalRoot = `${finalRoot}.tmp-${process.pid}-${Date.now()}`;
   await rm(tempFinalRoot, { recursive: true, force: true });
-  await rename(extractRoot, tempFinalRoot);
+  await rename(stagingRoot, tempFinalRoot);
 
   try {
     await rename(tempFinalRoot, finalRoot);
@@ -240,43 +335,52 @@ async function installExtractedModel(
     if (!hasReferenceEmbeddingModelFiles(finalDir)) {
       throw error;
     }
+    const installedMetadata = await readInstalledModelMetadata(finalDir);
+    if (
+      installedMetadata.archiveSha256 !== metadata.archiveSha256 ||
+      installedMetadata.archiveSize !== metadata.archiveSize
+    ) {
+      throw error;
+    }
   }
 
   return finalDir;
 }
 
 export async function installReferenceEmbeddingModel(): Promise<InstalledReferenceEmbeddingModel> {
-  const sourceUrl = getReferenceModelUrl();
-  if (!sourceUrl) {
-    throw new Error(
-      'IWSDK_REFERENCE_MODEL_URL must be set before running reference ingestion.',
-    );
-  }
-
   const sharedRoot = getReferenceSharedCacheRoot();
   const stagingRoot = path.join(
     getReferenceModelStagingRoot(sharedRoot),
     `${Date.now()}-${process.pid}`,
   );
+  const extractedDir = path.join(stagingRoot, 'model');
   const archivePath = path.join(stagingRoot, 'model.tgz');
 
-  try {
-    await mkdir(getReferenceModelsRoot(sharedRoot), { recursive: true });
-    await mkdir(stagingRoot, { recursive: true });
+  await rm(stagingRoot, { recursive: true, force: true });
+  await mkdir(path.join(extractedDir, 'onnx'), { recursive: true });
 
-    const metadata = await downloadReferenceModelArchive(
-      trimTrailingSlash(sourceUrl),
-      archivePath,
+  try {
+    for (const file of REFERENCE_MODEL_FILE_SOURCES) {
+      const destination = path.join(extractedDir, file.relativePath);
+      await downloadPinnedModelFile(file.sourceUrl, destination);
+    }
+
+    await createDeterministicModelArchive(extractedDir, archivePath);
+    const archiveStat = await stat(archivePath);
+    const metadata = buildReferenceEmbeddingModelMetadata(
+      await sha256File(archivePath),
+      archiveStat.size,
     );
-    const modelDir = await installExtractedModel(
-      archivePath,
+    const modelDir = await installReferenceModelFiles(
       metadata,
+      stagingRoot,
+      extractedDir,
       sharedRoot,
     );
     return {
       metadata,
       modelDir,
-      sourceUrl: trimTrailingSlash(sourceUrl),
+      sourceUrl: REFERENCE_MODEL_ONNX_URL,
     };
   } finally {
     await rm(stagingRoot, { recursive: true, force: true }).catch(() => {});

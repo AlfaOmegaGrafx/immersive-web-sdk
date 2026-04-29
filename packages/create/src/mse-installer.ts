@@ -198,7 +198,11 @@ export function isVersionSufficient(
   required: string = MSE_MIN_VERSION,
 ): boolean {
   try {
-    return semver.gte(installed, required);
+    const coerced = semver.coerce(installed);
+    if (!coerced) {
+      return false;
+    }
+    return semver.gte(coerced, required);
   } catch {
     return false;
   }

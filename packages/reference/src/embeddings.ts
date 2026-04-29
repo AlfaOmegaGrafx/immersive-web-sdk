@@ -9,29 +9,10 @@
  * Embedding service using transformers.js against a warmed local model cache.
  */
 
-import { existsSync } from 'fs';
-import path from 'path';
 import { env, pipeline } from '@huggingface/transformers';
 import { resolveReferenceAssets } from './assets.js';
+import { hasReferenceEmbeddingModelFiles } from './model-contract.js';
 import type { ReferenceEmbeddingModelMetadata } from './types.js';
-
-const REQUIRED_MODEL_FILES = [
-  'config.json',
-  'tokenizer.json',
-  'tokenizer_config.json',
-  'onnx/model_quantized.onnx',
-];
-
-function validateLocalModelDir(modelDir: string): string | null {
-  for (const relativePath of REQUIRED_MODEL_FILES) {
-    const absolutePath = path.join(modelDir, relativePath);
-    if (!existsSync(absolutePath)) {
-      return relativePath;
-    }
-  }
-
-  return null;
-}
 
 export class EmbeddingService {
   private extractor: any = null;
@@ -61,10 +42,9 @@ export class EmbeddingService {
       );
     }
 
-    const missingPath = validateLocalModelDir(localModelDir);
-    if (missingPath) {
+    if (!hasReferenceEmbeddingModelFiles(localModelDir)) {
       throw new Error(
-        `Reference model directory ${localModelDir} is missing ${missingPath}. Run "iwsdk reference warmup" again with IWSDK_REFERENCE_MODEL_URL pointing at a valid model archive.`,
+        `Reference model directory ${localModelDir} is incomplete. Run "iwsdk reference warmup" again to refresh the pinned model files.`,
       );
     }
 
@@ -82,7 +62,7 @@ export class EmbeddingService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(
-        `Failed to load the warmed reference embedding model from ${localModelDir}. Ensure "iwsdk reference warmup" completed successfully and that IWSDK_REFERENCE_MODEL_URL points at the matching model archive. Original error: ${message}`,
+        `Failed to load the warmed reference embedding model from ${localModelDir}. Ensure "iwsdk reference warmup" completed successfully. Original error: ${message}`,
       );
     }
     console.error('Embedding model loaded successfully');

@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import { createHash } from 'crypto';
 import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -13,11 +14,65 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   formatReferenceEmbeddingModel,
   installReferenceEmbeddingModel,
+  REFERENCE_MODEL_FILE_SOURCES,
+  REFERENCE_MODEL_ONNX_URL,
 } from '../tools/model.js';
 
 let tempDir: string;
-let archiveBuffer: Buffer;
 let sharedRoot: string;
+
+async function createModelArchive(): Promise<{ sha256: string; size: number }> {
+  const sourceRoot = path.join(tempDir, 'model-source');
+  const archivePath = path.join(tempDir, 'model.tgz');
+  const archiveRoot = path.join(sourceRoot, 'model');
+
+  await rm(sourceRoot, { recursive: true, force: true });
+  await mkdir(archiveRoot, { recursive: true });
+  for (const [sourceUrl, body] of MODEL_FILE_RESPONSES.entries()) {
+    const relativePath =
+      sourceUrl === REFERENCE_MODEL_ONNX_URL
+        ? 'onnx/model_quantized.onnx'
+        : sourceUrl.endsWith('/config.json')
+          ? 'config.json'
+          : sourceUrl.endsWith('/tokenizer.json')
+            ? 'tokenizer.json'
+            : 'tokenizer_config.json';
+    const destination = path.join(archiveRoot, relativePath);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, body);
+  }
+
+  await tar.c(
+    {
+      cwd: sourceRoot,
+      file: archivePath,
+      gzip: true,
+      portable: true,
+      noPax: true,
+      mtime: new Date(0),
+    },
+    ['model'],
+  );
+
+  const buffer = await readFile(archivePath);
+  return {
+    sha256: createHash('sha256').update(buffer).digest('hex'),
+    size: buffer.length,
+  };
+}
+const ONNX_BUFFER = Buffer.from('fake-onnx');
+const MODEL_FILE_RESPONSES = new Map<string, Buffer>(
+  REFERENCE_MODEL_FILE_SOURCES.map((file) => [
+    file.sourceUrl,
+    file.relativePath === 'config.json'
+      ? Buffer.from('{}\n')
+      : file.relativePath === 'tokenizer.json'
+        ? Buffer.from('{"version":"1.0"}\n')
+        : file.relativePath === 'tokenizer_config.json'
+          ? Buffer.from('{}\n')
+          : ONNX_BUFFER,
+  ]),
+);
 
 beforeEach(async () => {
   tempDir = path.join(
@@ -27,93 +82,67 @@ beforeEach(async () => {
       .slice(2)}`,
   );
   sharedRoot = path.join(tempDir, 'shared');
-  const packageRoot = path.join(tempDir, 'package');
-  const modelRoot = path.join(packageRoot, 'model');
-  const archivePath = path.join(tempDir, 'model.tgz');
-
-  await mkdir(path.join(modelRoot, 'onnx'), { recursive: true });
-  await writeFile(path.join(modelRoot, 'config.json'), '{}\n', 'utf8');
-  await writeFile(path.join(modelRoot, 'tokenizer.json'), '{}\n', 'utf8');
-  await writeFile(
-    path.join(modelRoot, 'tokenizer_config.json'),
-    '{}\n',
-    'utf8',
-  );
-  await writeFile(
-    path.join(modelRoot, 'onnx', 'model_quantized.onnx'),
-    'onnx',
-    'utf8',
-  );
-  await tar.c(
-    {
-      cwd: packageRoot,
-      file: archivePath,
-      gzip: true,
-      portable: true,
-      noPax: true,
-      mtime: new Date(0),
-    },
-    ['model'],
-  );
-  archiveBuffer = await readFile(archivePath);
 
   process.env.IWSDK_REFERENCE_CACHE_DIR = sharedRoot;
-  process.env.IWSDK_REFERENCE_MODEL_URL =
-    'https://models.example.test/model.tgz';
 });
 
 afterEach(async () => {
   delete process.env.IWSDK_REFERENCE_CACHE_DIR;
-  delete process.env.IWSDK_REFERENCE_MODEL_URL;
   vi.unstubAllGlobals();
   await rm(tempDir, { recursive: true, force: true });
 });
 
 describe('reference model installer', () => {
-  it('downloads and installs the configured model archive', async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(
-        new Response(archiveBuffer, {
-          status: 200,
-          headers: {
-            'content-length': String(archiveBuffer.length),
-          },
-        }),
-      ),
-    );
+  it('downloads and installs the pinned model files', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      const body = MODEL_FILE_RESPONSES.get(url);
+      if (!body) {
+        return new Response('not found', { status: 404 });
+      }
+      return new Response(body, {
+        status: 200,
+        headers: {
+          'content-length': String(body.length),
+        },
+      });
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const installed = await installReferenceEmbeddingModel();
+    const expectedArchive = await createModelArchive();
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://models.example.test/model.tgz',
-    );
-    expect(installed.sourceUrl).toBe('https://models.example.test/model.tgz');
+    expect(fetchMock).toHaveBeenCalledWith(REFERENCE_MODEL_ONNX_URL);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(installed.sourceUrl).toBe(REFERENCE_MODEL_ONNX_URL);
     expect(installed.metadata).toMatchObject({
       source: 'archive',
       format: 'transformers-js',
-      archiveSize: archiveBuffer.length,
+      archiveSha256: expectedArchive.sha256,
+      archiveSize: expectedArchive.size,
       dtype: 'q8',
       pooling: 'mean',
       normalize: true,
     });
-    expect(installed.metadata.archiveSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(formatReferenceEmbeddingModel(installed.metadata)).toBe(
-      `sha256:${installed.metadata.archiveSha256}`,
+      `sha256:${expectedArchive.sha256}`,
     );
   });
 
-  it('reuses the extracted cache path when the same archive is downloaded again', async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(
-        new Response(archiveBuffer, {
-          status: 200,
-          headers: {
-            'content-length': String(archiveBuffer.length),
-          },
-        }),
-      ),
-    );
+  it('reuses the extracted cache path when the same model is downloaded again', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      const body = MODEL_FILE_RESPONSES.get(url);
+      if (!body) {
+        return new Response('not found', { status: 404 });
+      }
+      return new Response(body, {
+        status: 200,
+        headers: {
+          'content-length': String(body.length),
+        },
+      });
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const firstInstall = await installReferenceEmbeddingModel();
@@ -123,14 +152,64 @@ describe('reference model installer', () => {
     expect(secondInstall.metadata.archiveSha256).toBe(
       firstInstall.metadata.archiveSha256,
     );
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
   });
 
-  it('fails clearly when the model URL is missing', async () => {
-    delete process.env.IWSDK_REFERENCE_MODEL_URL;
+  it('repairs a corrupted cached model directory before reuse', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      const body = MODEL_FILE_RESPONSES.get(url);
+      if (!body) {
+        return new Response('not found', { status: 404 });
+      }
+      return new Response(body, {
+        status: 200,
+        headers: {
+          'content-length': String(body.length),
+        },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const firstInstall = await installReferenceEmbeddingModel();
+    await writeFile(
+      path.join(firstInstall.modelDir, 'config.json'),
+      '{"corrupt":true}\n',
+      'utf8',
+    );
+
+    const repairedInstall = await installReferenceEmbeddingModel();
+    const repairedConfig = await readFile(
+      path.join(repairedInstall.modelDir, 'config.json'),
+      'utf8',
+    );
+
+    expect(repairedInstall.modelDir).toBe(firstInstall.modelDir);
+    expect(repairedConfig).toBe('{}\n');
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+  });
+
+  it('fails clearly when the pinned ONNX download fails', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === REFERENCE_MODEL_ONNX_URL) {
+        return new Response('not found', { status: 404 });
+      }
+      const body = MODEL_FILE_RESPONSES.get(url);
+      if (!body) {
+        return new Response('not found', { status: 404 });
+      }
+      return new Response(body, {
+        status: 200,
+        headers: {
+          'content-length': String(body.length),
+        },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     await expect(installReferenceEmbeddingModel()).rejects.toThrow(
-      'IWSDK_REFERENCE_MODEL_URL',
+      REFERENCE_MODEL_ONNX_URL,
     );
   });
 });

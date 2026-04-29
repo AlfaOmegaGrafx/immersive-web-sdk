@@ -56,7 +56,7 @@ This is where the user's request drives the work. Edit the `.uikitml` file in `u
 ### Key facts about UIKITML
 
 - UIKITML is a **subset of HTML**, not all syntax is supported.
-- **Before writing markup**, use `mcp__iwsdk-rag-local__search_code` to query for supported UIKITML element types and CSS properties. Search for things like "uikitml interpret container text" or specific element types you need.
+- **Before writing markup**, use `mcp__iwsdk-reference__search_code` to query for supported UIKITML element types and CSS properties. Search for things like "uikitml interpret container text" or specific element types you need.
 - Supported selectors: `#id` and `.class` (via PanelDocument's `querySelector`).
 - Units are in **centimeters** (e.g., `width: 50` = 50cm). World space uses meters. `100cm = 1m`.
 - The source of truth is the `.uikitml` file. Changes are auto-compiled by the vite plugin and hot-reloaded.

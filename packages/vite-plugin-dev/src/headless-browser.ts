@@ -33,6 +33,7 @@ export interface LogQuery {
 }
 
 const MAX_LOGS = 1000;
+const TRACE_PREFIX = '[IWSDK-MCP-TRACE]';
 
 /** Map Playwright console message types to our LogLevel. */
 const PLAYWRIGHT_TYPE_MAP: Record<string, LogLevel | undefined> = {
@@ -110,6 +111,8 @@ export interface ManagedBrowser {
   page: unknown; // playwright.Page
   /** Query captured console logs. */
   queryLogs(options?: LogQuery): CapturedLog[];
+  /** Read the managed browser tab identity used by MCP metadata. */
+  getTabMetadata(): Promise<{ id: string | null; generation: number | null }>;
   /** Take a screenshot of the browser page via CDP. */
   screenshot(): Promise<Buffer>;
   /** Register a callback invoked when the page/browser closes unexpectedly. */
@@ -127,8 +130,8 @@ let installPromise: Promise<void> | null = null;
  * On install failure the flag stays unset so the next retry can try again.
  */
 async function ensureChromiumInstalled(): Promise<void> {
-  if (chromiumInstalled) return;
-  if (installPromise) return installPromise;
+  if (chromiumInstalled) {return;}
+  if (installPromise) {return installPromise;}
 
   const execPath = chromium.executablePath();
   if (fs.existsSync(execPath)) {
@@ -188,6 +191,7 @@ export async function launchManagedBrowser(
     width: 800,
     height: 800,
   },
+  traceMcp = false,
 ): Promise<ManagedBrowser> {
   await ensureChromiumInstalled();
 
@@ -232,7 +236,7 @@ export async function launchManagedBrowser(
     // Also forward to Node console for debugging
     if (type === 'error') {
       console.error('[browser]', text);
-    } else if (verbose) {
+    } else if (verbose || text.startsWith(TRACE_PREFIX)) {
       console.log(`[browser:${type}]`, text);
     }
   });
@@ -263,9 +267,10 @@ export async function launchManagedBrowser(
   // Mark this tab as the Playwright-managed tab. The injection template
   // checks this flag and only initializes the MCP WebSocket client when
   // present, so manually-opened browser tabs are not remote-controlled.
-  await page.addInitScript(() => {
+  await page.addInitScript((traceEnabled: boolean) => {
     (window as any).__IWER_MCP_MANAGED = true;
-  });
+    (window as any).__IWSDK_MCP_TRACE = traceEnabled;
+  }, traceMcp);
 
   await page.goto(url, { waitUntil: 'networkidle' });
 
@@ -308,6 +313,25 @@ export async function launchManagedBrowser(
     },
     page,
     queryLogs: (options?: LogQuery) => consoleCapture.query(options),
+    getTabMetadata: async () =>
+      page.evaluate(() => {
+        const id =
+          typeof sessionStorage !== 'undefined'
+            ? sessionStorage.getItem('iwer-mcp-tab-id')
+            : null;
+        const rawGeneration =
+          typeof sessionStorage !== 'undefined'
+            ? sessionStorage.getItem('iwer-mcp-gen')
+            : null;
+        const generation =
+          rawGeneration != null && rawGeneration !== ''
+            ? Number(rawGeneration)
+            : null;
+        return {
+          id,
+          generation: Number.isFinite(generation) ? generation : null,
+        };
+      }),
     screenshot: async () => {
       const raw = await page.screenshot({ type: 'png' });
       // In non-agent modes (viewport is null / freely resizable), downscale

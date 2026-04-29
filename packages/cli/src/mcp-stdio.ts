@@ -11,12 +11,13 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { reportToolCall } from './hzdb-telemetry.js';
 import {
+  isRuntimeBrowserCommandReady,
   RUNTIME_MCP_TOOLS,
   RUNTIME_OPERATIONS,
   type RuntimeSession,
 } from './runtime-contract.js';
-import { reportToolCall } from './hzdb-telemetry.js';
 import {
   RuntimeCommandExecutionError,
   sendRuntimeCommand,
@@ -53,6 +54,7 @@ function createTabMetadataText(
 
 function createTabTracker() {
   let lastTabId: string | null = null;
+  let lastTabGeneration: number | null = null;
 
   return {
     processResponse(rawResponse: RuntimeCommandResponse) {
@@ -60,18 +62,31 @@ function createTabTracker() {
       const tabId = rawResponse._tabId;
       const tabGeneration = rawResponse._tabGeneration;
       const previousTabId = lastTabId;
+      const previousTabGeneration = lastTabGeneration;
       const tabChanged =
         previousTabId !== null && tabId != null && tabId !== previousTabId;
+      const tabReloaded =
+        previousTabId !== null &&
+        previousTabId === tabId &&
+        previousTabGeneration !== null &&
+        typeof tabGeneration === 'number' &&
+        tabGeneration !== previousTabGeneration;
 
       if (tabId) {
         lastTabId = tabId;
+        lastTabGeneration =
+          typeof tabGeneration === 'number' ? tabGeneration : null;
       }
 
       const content: McpTextContent[] = [];
-      if (tabChanged) {
+      if (tabChanged || tabReloaded) {
         content.push({
           type: 'text',
-          text: `WARNING: Active browser tab changed (previous: ${previousTabId}, current: ${tabId}). All previously cached state (device positions, scene hierarchy, ECS snapshots) is now invalid. Re-query any state you need before proceeding.`,
+          text: `WARNING: ${
+            tabChanged
+              ? `Active browser tab changed (previous: ${previousTabId}, current: ${tabId})`
+              : `Active browser tab reloaded (tab: ${tabId}, generation: ${previousTabGeneration} -> ${tabGeneration})`
+          }. All previously cached state (device positions, scene hierarchy, ECS snapshots) is now invalid. Re-query any state you need before proceeding.`,
         });
       }
 
@@ -97,7 +112,9 @@ function createTabTracker() {
         text: JSON.stringify(
           {
             ...normalizedResult,
-            ...(tabId ? { _tab: { id: tabId, generation: tabGeneration } } : {}),
+            ...(tabId
+              ? { _tab: { id: tabId, generation: tabGeneration } }
+              : {}),
           },
           null,
           2,
@@ -109,15 +126,20 @@ function createTabTracker() {
   };
 }
 
-function withBrowserStatus(result: unknown, session: RuntimeSession): JsonObject {
+function withBrowserStatus(
+  result: unknown,
+  session: RuntimeSession,
+): JsonObject {
   const browser = session.browser ?? null;
   const browserConnected = Boolean(session.browser?.connected);
+  const browserCommandReady = isRuntimeBrowserCommandReady(session);
 
   if (isRecord(result)) {
     return {
       ...result,
       browser,
       browserConnected,
+      browserCommandReady,
     };
   }
 
@@ -125,6 +147,7 @@ function withBrowserStatus(result: unknown, session: RuntimeSession): JsonObject
     value: result,
     browser,
     browserConnected,
+    browserCommandReady,
   };
 }
 
@@ -168,7 +191,9 @@ export async function startRuntimeMcpStdioServer({
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const operation = RUNTIME_OPERATIONS.find((entry) => entry.mcpName === name);
+    const operation = RUNTIME_OPERATIONS.find(
+      (entry) => entry.mcpName === name,
+    );
     const startTime = Date.now();
 
     if (!operation) {
@@ -183,9 +208,18 @@ export async function startRuntimeMcpStdioServer({
       session = await resolveSession();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      reportToolCall(name, false, Date.now() - startTime, message.slice(0, 30), undefined, version);
+      reportToolCall(
+        name,
+        false,
+        Date.now() - startTime,
+        message.slice(0, 30),
+        undefined,
+        version,
+      );
       return {
-        content: [{ type: 'text', text: `Failed to resolve IWSDK runtime: ${message}` }],
+        content: [
+          { type: 'text', text: `Failed to resolve IWSDK runtime: ${message}` },
+        ],
         isError: true,
       };
     }
@@ -230,7 +264,10 @@ export async function startRuntimeMcpStdioServer({
         name === 'xr_get_session_status'
           ? {
               ...rawResponse,
-              result: withBrowserStatus(rawResponse.result ?? rawResponse, session),
+              result: withBrowserStatus(
+                rawResponse.result ?? rawResponse,
+                session,
+              ),
             }
           : rawResponse;
       const result = normalizedResponse.result ?? normalizedResponse;

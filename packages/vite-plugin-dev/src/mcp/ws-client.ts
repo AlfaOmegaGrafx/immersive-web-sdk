@@ -26,6 +26,7 @@ interface FrameworkMCPRuntime {
 declare global {
   interface Window {
     FRAMEWORK_MCP_RUNTIME?: FrameworkMCPRuntime;
+    __IWSDK_MCP_TRACE?: boolean;
   }
 }
 
@@ -98,6 +99,26 @@ export class MCPWebSocketClient {
     this.tabGeneration = gen;
   }
 
+  private isTraceEnabled(): boolean {
+    return (
+      this.verbose ||
+      (typeof window !== 'undefined' && window.__IWSDK_MCP_TRACE === true)
+    );
+  }
+
+  private trace(message: string, details: Record<string, unknown> = {}): void {
+    if (!this.isTraceEnabled()) {
+      return;
+    }
+    console.log(
+      `[IWSDK-MCP-TRACE] ${message} ${JSON.stringify({
+        ...details,
+        tabId: this.tabId,
+        tabGeneration: this.tabGeneration,
+      })}`,
+    );
+  }
+
   /**
    * Connect to the Vite dev server's WebSocket endpoint
    */
@@ -117,6 +138,10 @@ export class MCPWebSocketClient {
     if (this.verbose) {
       console.log('[IWSDK-MCP] Connecting to:', wsUrl);
     }
+    this.trace('client_connect_start', {
+      wsUrl,
+      reconnectAttempts: this.reconnectAttempts,
+    });
 
     try {
       this.ws = new WebSocket(wsUrl);
@@ -160,6 +185,7 @@ export class MCPWebSocketClient {
       if (this.verbose) {
         console.log('[IWSDK-MCP] Connected');
       }
+      this.trace('client_open');
       this.reconnectAttempts = 0;
       this.ws?.send(
         JSON.stringify({
@@ -168,6 +194,7 @@ export class MCPWebSocketClient {
           tabGeneration: this.tabGeneration,
         }),
       );
+      this.trace('client_hello_sent');
     };
 
     this.ws.onclose = (event) => {
@@ -177,6 +204,11 @@ export class MCPWebSocketClient {
           event.reason || 'Connection closed',
         );
       }
+      this.trace('client_close', {
+        code: event.code,
+        reason: event.reason || 'Connection closed',
+        intentional: this.intentionalDisconnect,
+      });
       this.ws = null;
       if (!this.intentionalDisconnect) {
         this.scheduleReconnect();
@@ -184,6 +216,12 @@ export class MCPWebSocketClient {
     };
 
     this.ws.onerror = (error) => {
+      this.trace('client_error', {
+        message:
+          error instanceof ErrorEvent && error.message
+            ? error.message
+            : 'WebSocket error',
+      });
       console.error('[IWSDK-MCP] WebSocket error:', error);
     };
 
@@ -214,6 +252,10 @@ export class MCPWebSocketClient {
     if (this.verbose) {
       console.debug('[IWSDK-MCP] Received:', request.method, request.params);
     }
+    this.trace('client_request_received', {
+      id: request.id,
+      method: request.method,
+    });
 
     const response: MCPResponse = { id: request.id };
 
@@ -275,6 +317,10 @@ export class MCPWebSocketClient {
         _tabId: this.tabId,
         _tabGeneration: this.tabGeneration,
       };
+      this.trace('client_response_sent', {
+        id: response.id,
+        hasError: Boolean(response.error),
+      });
       this.ws.send(JSON.stringify(enriched));
     }
   }
@@ -295,6 +341,10 @@ export class MCPWebSocketClient {
         `[IWSDK-MCP] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`,
       );
     }
+    this.trace('client_reconnect_scheduled', {
+      delay,
+      attempt: this.reconnectAttempts,
+    });
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;

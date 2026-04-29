@@ -21,7 +21,9 @@
   },
   "typesVersions": {
     "*": {
-      "contract": ["dist/runtime-contract.d.ts"]
+      "contract": [
+        "dist/runtime-contract.d.ts"
+      ]
     }
   },
   "files": [

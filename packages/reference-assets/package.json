@@ -7,7 +7,8 @@
   "scripts": {
     "build:tools": "tsc -p tsconfig.tools.json",
     "ingest": "npm run build:tools && node dist-tools/tools/ingest.js",
-    "build:payload": "pnpm run ingest && pnpm run build && pnpm run build:model",
+    "build:payload": "node ./scripts/build-payload.mjs",
+    "build:payload:if-ready": "node ./scripts/build-payload.mjs --if-ready",
     "build": "node ./scripts/build-assets.mjs",
     "build:model": "node ./scripts/build-model.mjs",
     "build:if-ready": "node ./scripts/build-assets.mjs --if-ready",

@@ -6,15 +6,17 @@
  */
 
 import WebSocket from 'ws';
-import type {
-  RuntimeBrowserState,
-  RuntimeIssueCause,
-  RuntimeSession,
+import {
+  isRuntimeBrowserCommandReady,
+  type RuntimeBrowserState,
+  type RuntimeIssueCause,
+  type RuntimeSession,
 } from './runtime-contract.js';
 
 const FAST_WSS_FALLBACK_TIMEOUT_MS = 1500;
 
 type RuntimeCommandError = { message?: string; cause?: RuntimeIssueCause };
+type TransportProtocol = 'ws' | 'wss';
 
 export interface RuntimeCommandResponse {
   id?: string;
@@ -63,6 +65,47 @@ class RuntimeCommandTransportError extends RuntimeCommandExecutionError {
   }
 }
 
+function isTraceEnabled(): boolean {
+  return process.env.IWSDK_RUNTIME_TRACE === '1';
+}
+
+function traceTransport(
+  event: string,
+  details: Record<string, unknown> = {},
+): void {
+  if (!isTraceEnabled()) {
+    return;
+  }
+  console.error(
+    `[IWSDK-RUNTIME-TRACE][transport] ${event} ${JSON.stringify(details)}`,
+  );
+}
+
+function getRawDataSize(data: WebSocket.RawData): number {
+  if (typeof data === 'string') {
+    return Buffer.byteLength(data);
+  }
+  if (Array.isArray(data)) {
+    return data.reduce((total, chunk) => total + chunk.length, 0);
+  }
+  if (data instanceof ArrayBuffer) {
+    return data.byteLength;
+  }
+  return data.length;
+}
+
+function getProtocolOrder(
+  runtimeSession?: RuntimeSession | null,
+): TransportProtocol[] {
+  if (runtimeSession?.localUrl.startsWith('http://')) {
+    return ['ws'];
+  }
+  if (runtimeSession?.localUrl.startsWith('https://')) {
+    return ['wss'];
+  }
+  return ['wss', 'ws'];
+}
+
 function inferRuntimeIssueCause(
   message: string,
   browser: RuntimeBrowserState | undefined,
@@ -76,7 +119,10 @@ function inferRuntimeIssueCause(
   if (browser?.status === 'launch_failed') {
     return browser.lastError?.cause ?? 'browser_launch_failed';
   }
-  if (browser?.status === 'launching' || browser?.status === 'waiting_for_connection') {
+  if (
+    browser?.status === 'launching' ||
+    browser?.status === 'waiting_for_connection'
+  ) {
     return 'browser_not_ready';
   }
   if (browser?.status === 'disconnected') {
@@ -85,25 +131,40 @@ function inferRuntimeIssueCause(
   if (normalized.includes('browser not ready')) {
     return browser?.lastError?.cause ?? 'browser_not_ready';
   }
-  if (normalized.includes('browser_relaunched') || normalized.includes('relaunch')) {
+  if (
+    normalized.includes('browser_relaunched') ||
+    normalized.includes('relaunch')
+  ) {
     return 'browser_relaunched';
   }
-  if (/permission|not permitted|denied|sandbox|eacces|eperm/i.test(normalized)) {
+  if (
+    /permission|not permitted|denied|sandbox|eacces|eperm/i.test(normalized)
+  ) {
     return 'permission_denied';
   }
   if (
     normalized.includes('socket hang up') ||
+    normalized.includes('closed before response') ||
     normalized.includes('request timeout') ||
     normalized.includes('econnreset') ||
     normalized.includes('econnrefused')
   ) {
+    if (
+      browser &&
+      !isRuntimeBrowserCommandReady({
+        schemaVersion: 1,
+        browser,
+      })
+    ) {
+      return 'browser_not_ready';
+    }
     return browser?.connected ? 'connection_lost' : 'browser_not_ready';
   }
   return undefined;
 }
 
 async function trySendRuntimeCommand(
-  protocol: 'ws' | 'wss',
+  protocol: TransportProtocol,
   port: number,
   method: string,
   params: unknown,
@@ -112,77 +173,220 @@ async function trySendRuntimeCommand(
 ): Promise<RuntimeCommandResponse> {
   return new Promise<RuntimeCommandResponse>((resolve, reject) => {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const ws = new WebSocket(`${protocol}://localhost:${port}/__iwer_mcp`, {
+    const wsUrl = `${protocol}://localhost:${port}/__iwer_mcp`;
+    const ws = new WebSocket(wsUrl, {
       rejectUnauthorized: false,
+    });
+    let settled = false;
+
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+
+    const closeSocket = () => {
+      if (
+        ws.readyState === WebSocket.OPEN ||
+        ws.readyState === WebSocket.CONNECTING
+      ) {
+        ws.close();
+      }
+    };
+
+    traceTransport('connect_start', {
+      method,
+      requestId,
+      protocol,
+      port,
+      timeoutMs,
+      browserStatus: browser?.status,
+      bridgeConnected: browser?.connected ?? false,
+      commandReady: browser
+        ? isRuntimeBrowserCommandReady({
+            schemaVersion: 1,
+            browser,
+          })
+        : false,
     });
 
     const timeout = setTimeout(() => {
-      ws.close();
       const message = `Request timeout for ${method}`;
-      reject(
-        new RuntimeCommandTransportError(message, {
-          issueCause: inferRuntimeIssueCause(message, browser),
-          browser,
-        }),
+      traceTransport('timeout', {
+        method,
+        requestId,
+        protocol,
+        port,
+      });
+      closeSocket();
+      finish(() =>
+        reject(
+          new RuntimeCommandTransportError(message, {
+            issueCause: inferRuntimeIssueCause(message, browser),
+            browser,
+          }),
+        ),
       );
     }, timeoutMs);
 
     ws.on('open', () => {
-      ws.send(
-        JSON.stringify({
-          id: requestId,
+      const payload = JSON.stringify({
+        id: requestId,
+        method,
+        params: params ?? {},
+      });
+      traceTransport('open', {
+        method,
+        requestId,
+        protocol,
+        port,
+      });
+      ws.send(payload, (error) => {
+        if (!error) {
+          traceTransport('send', {
+            method,
+            requestId,
+            protocol,
+            bytes: Buffer.byteLength(payload),
+          });
+          return;
+        }
+        traceTransport('send_error', {
           method,
-          params: params ?? {},
-        }),
-      );
+          requestId,
+          protocol,
+          message: error.message,
+        });
+        closeSocket();
+        finish(() =>
+          reject(
+            new RuntimeCommandTransportError(error.message, {
+              issueCause: inferRuntimeIssueCause(error.message, browser),
+              browser,
+            }),
+          ),
+        );
+      });
     });
 
     ws.on('message', (data: WebSocket.RawData) => {
+      traceTransport('message', {
+        method,
+        requestId,
+        protocol,
+        bytes: getRawDataSize(data),
+      });
       try {
         const response = JSON.parse(data.toString()) as RuntimeCommandResponse;
         if (response.id !== requestId) {
+          traceTransport('message_ignored', {
+            method,
+            requestId,
+            protocol,
+            responseId: response.id ?? null,
+          });
           return;
         }
 
-        clearTimeout(timeout);
-        ws.close();
+        closeSocket();
         if (response.error) {
           const message = response.error.message ?? 'Unknown runtime error';
-          reject(
-            new RuntimeCommandExecutionError(message, {
-              issueCause: inferRuntimeIssueCause(message, browser, response.error.cause),
-              browser,
-            }),
+          const explicitCause = response.error.cause;
+          traceTransport('runtime_error', {
+            method,
+            requestId,
+            protocol,
+            message,
+            cause: explicitCause ?? null,
+          });
+          finish(() =>
+            reject(
+              new RuntimeCommandExecutionError(message, {
+                issueCause: inferRuntimeIssueCause(
+                  message,
+                  browser,
+                  explicitCause,
+                ),
+                browser,
+              }),
+            ),
           );
           return;
         }
-        resolve(response);
+        traceTransport('response', {
+          method,
+          requestId,
+          protocol,
+        });
+        finish(() => resolve(response));
       } catch (error) {
-        clearTimeout(timeout);
-        ws.close();
-        reject(
-          new RuntimeCommandTransportError(
-            error instanceof Error ? error.message : String(error),
-            {
-              issueCause: inferRuntimeIssueCause(
-                error instanceof Error ? error.message : String(error),
-                browser,
-              ),
+        const message = error instanceof Error ? error.message : String(error);
+        traceTransport('message_parse_error', {
+          method,
+          requestId,
+          protocol,
+          message,
+        });
+        closeSocket();
+        finish(() =>
+          reject(
+            new RuntimeCommandTransportError(message, {
+              issueCause: inferRuntimeIssueCause(message, browser),
               browser,
-            },
+            }),
           ),
         );
       }
     });
 
     ws.on('error', (error: Error) => {
-      clearTimeout(timeout);
-      ws.close();
-      reject(
-        new RuntimeCommandTransportError(error.message, {
-          issueCause: inferRuntimeIssueCause(error.message, browser),
-          browser,
-        }),
+      traceTransport('error', {
+        method,
+        requestId,
+        protocol,
+        message: error.message,
+      });
+      closeSocket();
+      finish(() =>
+        reject(
+          new RuntimeCommandTransportError(error.message, {
+            issueCause: inferRuntimeIssueCause(error.message, browser),
+            browser,
+          }),
+        ),
+      );
+    });
+
+    ws.on('close', (code, reasonBuffer) => {
+      const reason =
+        typeof reasonBuffer === 'string'
+          ? reasonBuffer
+          : reasonBuffer.toString('utf8');
+      traceTransport('close', {
+        method,
+        requestId,
+        protocol,
+        code,
+        reason,
+        settled,
+      });
+      if (settled) {
+        return;
+      }
+      const message =
+        reason && reason.length > 0
+          ? `Connection closed before response for ${method}: ${reason}`
+          : `Connection closed before response for ${method} (code ${code})`;
+      finish(() =>
+        reject(
+          new RuntimeCommandTransportError(message, {
+            issueCause: inferRuntimeIssueCause(message, browser),
+            browser,
+          }),
+        ),
       );
     });
   });
@@ -196,24 +400,55 @@ export async function sendRuntimeCommand({
   runtimeSession,
 }: SendRuntimeCommandOptions): Promise<RuntimeCommandResponse> {
   const browser = runtimeSession?.browser;
-  const secureAttemptTimeout = Math.min(timeoutMs, FAST_WSS_FALLBACK_TIMEOUT_MS);
+  const protocolOrder = getProtocolOrder(runtimeSession);
+  const firstProtocol = protocolOrder[0];
+  const fallbackProtocol = protocolOrder[1];
+  const firstAttemptTimeout =
+    fallbackProtocol && firstProtocol === 'wss'
+      ? Math.min(timeoutMs, FAST_WSS_FALLBACK_TIMEOUT_MS)
+      : timeoutMs;
   const startedAt = Date.now();
 
   try {
     return await trySendRuntimeCommand(
-      'wss',
+      firstProtocol,
       port,
       method,
       params,
-      secureAttemptTimeout,
+      firstAttemptTimeout,
       browser,
     );
   } catch (error) {
     if (!(error instanceof RuntimeCommandTransportError)) {
       throw error;
     }
+    if (!fallbackProtocol || fallbackProtocol === firstProtocol) {
+      throw error;
+    }
     const elapsedMs = Date.now() - startedAt;
     const remainingMs = Math.max(timeoutMs - elapsedMs, 1);
-    return trySendRuntimeCommand('ws', port, method, params, remainingMs, browser);
+    traceTransport('fallback_protocol', {
+      method,
+      from: firstProtocol,
+      to: fallbackProtocol,
+      elapsedMs,
+      remainingMs,
+      browserStatus: browser?.status,
+      bridgeConnected: browser?.connected ?? false,
+      commandReady: browser
+        ? isRuntimeBrowserCommandReady({
+            schemaVersion: 1,
+            browser,
+          })
+        : false,
+    });
+    return trySendRuntimeCommand(
+      fallbackProtocol,
+      port,
+      method,
+      params,
+      remainingMs,
+      browser,
+    );
   }
 }

@@ -5,9 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import { mkdir, readFile, realpath, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { mkdir, readFile, realpath, rm, writeFile } from 'fs/promises';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
   findNearestIwsdkAppRoot,
@@ -41,8 +41,16 @@ async function createAppFixture(
     },
     ...packageJson,
   };
-  await writeFile(path.join(root, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  await writeFile(path.join(root, 'vite.config.ts'), 'export default {}\n', 'utf8');
+  await writeFile(
+    path.join(root, 'package.json'),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    'utf8',
+  );
+  await writeFile(
+    path.join(root, 'vite.config.ts'),
+    'export default {}\n',
+    'utf8',
+  );
   await mkdir(path.join(root, 'src'), { recursive: true });
   await writeFile(path.join(root, 'src', 'main.ts'), 'export {};\n', 'utf8');
 }
@@ -69,7 +77,9 @@ afterEach(async () => {
 describe('workspace detection', () => {
   test('detects IWSDK app roots with nearest-parent resolution', async () => {
     expect(isIwsdkAppRoot(appA)).toBe(true);
-    expect(findNearestIwsdkAppRoot(path.join(appA, 'src'))).toBe(await realpath(appA));
+    expect(findNearestIwsdkAppRoot(path.join(appA, 'src'))).toBe(
+      await realpath(appA),
+    );
     expect(isIwsdkAppRoot(nonIwsdkViteApp)).toBe(false);
     expect(findNearestIwsdkAppRoot(tempDir)).toBeNull();
   });
@@ -131,6 +141,13 @@ describe('project-local runtime state', () => {
     expect(state.launch?.openBrowser).toBe(true);
   });
 
+  test('reports browser command readiness as false without a runtime session', async () => {
+    const state = await getWorkspaceRuntimeState(appA);
+    expect(state.running).toBe(false);
+    expect(state.browserConnected).toBe(false);
+    expect(state.browserCommandReady).toBe(false);
+  });
+
   test('updates persisted browser readiness state', async () => {
     await registerRuntimeSession({
       sessionId: 'session-browser',
@@ -143,6 +160,7 @@ describe('project-local runtime state', () => {
       browser: {
         status: 'launching',
         connected: false,
+        commandReady: false,
         connectedClientCount: 0,
         lastTransitionAt: new Date().toISOString(),
       },
@@ -151,14 +169,91 @@ describe('project-local runtime state', () => {
     await setRuntimeSessionBrowserState(appA, {
       status: 'connected',
       connected: true,
+      commandReady: true,
       connectedClientCount: 1,
       lastTransitionAt: new Date().toISOString(),
+      lastBridgeConnectedAt: new Date().toISOString(),
+      lastCommandReadyAt: new Date().toISOString(),
     });
 
     const session = await getRuntimeSession(appA);
     const state = await getWorkspaceRuntimeState(appA);
     expect(session?.browser?.status).toBe('connected');
     expect(state.browserConnected).toBe(true);
+    expect(state.browserCommandReady).toBe(true);
+  });
+
+  test('treats legacy connected browser sessions as command ready', async () => {
+    const sessionFile = getRuntimeSessionFilePath(appA);
+    await mkdir(path.dirname(sessionFile), { recursive: true });
+    await writeFile(
+      sessionFile,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          sessionId: 'legacy-browser-session',
+          workspaceRoot: await realpath(appA),
+          pid: process.pid,
+          port: 5173,
+          localUrl: 'http://localhost:5173',
+          networkUrls: [],
+          aiTools: [],
+          browser: {
+            status: 'connected',
+            connected: true,
+            connectedClientCount: 1,
+            lastTransitionAt: new Date().toISOString(),
+          },
+          registeredAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ) + '\n',
+      'utf8',
+    );
+
+    const state = await getWorkspaceRuntimeState(appA);
+    expect(state.browserConnected).toBe(true);
+    expect(state.browserCommandReady).toBe(true);
+  });
+
+  test('treats legacy connected browser sessions as command ready', async () => {
+    const sessionFile = getRuntimeSessionFilePath(appA);
+
+    await mkdir(path.dirname(sessionFile), { recursive: true });
+    await writeFile(
+      sessionFile,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          sessionId: 'legacy-session',
+          workspaceRoot: await realpath(appA),
+          pid: process.pid,
+          port: 5173,
+          localUrl: 'http://localhost:5173',
+          networkUrls: [],
+          aiTools: [],
+          browser: {
+            status: 'connected',
+            connected: true,
+            connectedClientCount: 1,
+            lastTransitionAt: new Date().toISOString(),
+          },
+          registeredAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ) + '\n',
+      'utf8',
+    );
+
+    const session = await getRuntimeSession(appA);
+    const state = await getWorkspaceRuntimeState(appA);
+    expect(session?.browser?.connected).toBe(true);
+    expect(state.browserConnected).toBe(true);
+    expect(state.browserCommandReady).toBe(true);
   });
 
   test('cleans stale session and launch files', async () => {

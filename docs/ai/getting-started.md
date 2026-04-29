@@ -51,10 +51,14 @@ When the server starts, several things happen automatically:
 3. Canonical project-local MCP configs are synced for the configured AI tools
 4. The MCP WebSocket endpoint is registered at `/__iwer_mcp`
 
-If you need the resolved runtime URL, want to inspect adapter state explicitly, or need to confirm that the managed browser bridge is actually connected, run `npx iwsdk dev status`. The `state.browserConnected` field and `state.session.browser` block are the source of truth for browser readiness.
+If you need the resolved runtime URL, want to inspect adapter state explicitly, or need to confirm that the managed browser bridge is actually ready to accept commands, run `npx iwsdk dev status`. The `state.browserCommandReady` field and `state.session.browser.commandReady` value are the source of truth for browser readiness.
 
 ::: tip MCP config files are refreshed, not deleted
 The managed config files (`.mcp.json`, `.cursor/mcp.json`, etc.) are intentionally left on disk and refreshed on the next run. `npm run dev` and `iwsdk adapter sync` both write the same canonical workspace-based entries.
+:::
+
+::: tip Optional reference warmup
+If your project installs `@iwsdk/reference`, run `npx iwsdk reference warmup` once after install. That step prepares the pinned reference corpus under your project's `.iwsdk/reference` state, populates the shared corpus store, and eagerly downloads the pinned model into the shared model cache. Set `IWSDK_REFERENCE_ASSETS_BASE_URL` too when you are hosting the corpus payload yourself instead of relying on the published `@iwsdk/reference-assets` package. SDK bundles intentionally exclude the corpus payload, so bundle/internal deployments must host it separately before warmup. The pinned model file URLs themselves are baked into the SDK, so warmup still requires access to those public URLs unless the shared cache has already been pre-warmed.
 :::
 
 ## Connect Your AI Tool
@@ -65,7 +69,7 @@ Claude Code automatically discovers the `.mcp.json` file in your project root. J
 
 In environments that lazily load MCP tool schemas, discovery is not the same as runtime readiness:
 
-1. Load the `mcp__iwsdk__*` tool schemas with your editor's tool-search/discovery step if needed.
+1. Load the `mcp__iwsdk-runtime__*` tool schemas with your editor's tool-search/discovery step if needed.
 2. Call `xr_get_session_status` as the first runtime check once the tool is available.
 3. If MCP tools are still deferred, fall back to the CLI (`npx iwsdk xr status`, `npx iwsdk browser screenshot`, etc.) until the schemas are hydrated.
 

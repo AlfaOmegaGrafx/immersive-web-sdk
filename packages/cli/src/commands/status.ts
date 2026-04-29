@@ -12,7 +12,11 @@ import type {
   CliSuccess,
   ResolvedCliIo,
 } from '../cli-types.js';
-import { findNearestIwsdkAppRoot, getWorkspaceRuntimeState, resolveWorkspaceRoot } from '../runtime-state.js';
+import {
+  findNearestIwsdkAppRoot,
+  getWorkspaceRuntimeState,
+  resolveWorkspaceRoot,
+} from '../runtime-state.js';
 import { readAdapterStatus } from './adapter.js';
 
 export async function detectWorkspaceForStatus(
@@ -38,7 +42,10 @@ export async function handleStatus(
   options: CliOptions,
   io: ResolvedCliIo,
 ): Promise<CliSuccess<unknown>> {
-  const workspaceRoot = await detectWorkspaceForStatus(io.cwd, options.workspace);
+  const workspaceRoot = await detectWorkspaceForStatus(
+    io.cwd,
+    options.workspace,
+  );
 
   if (!workspaceRoot) {
     return createSuccess({

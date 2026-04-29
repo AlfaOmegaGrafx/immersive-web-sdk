@@ -6,6 +6,8 @@ outline: [2, 4]
 
 The IWSDK MCP server exposes 32 tools organized into 9 categories. These tools give AI agents full control over the emulated XR runtime, the browser, the Three.js scene, and the ECS simulation.
 
+If you change the runtime tool contract or CLI mappings, run `pnpm test:cli-mcp-parity`. If you change `@iwsdk/reference` CLI/MCP mappings, run `pnpm test:reference-cli-mcp-parity`. Run `pnpm test:mcp-parity` when a change touches both surfaces or when you want the full contract check before review.
+
 ## Session Management
 
 ### `xr_get_session_status`
@@ -100,19 +102,19 @@ Get the current select (trigger/pinch) value for an input device.
 
 Set the select (trigger/pinch) value. Use for grab-move-release patterns: set to 1.0 to grab, move the controller, then set to 0.0 to release.
 
-| Parameter | Type     | Required | Description                               |
-| --------- | -------- | -------- | ----------------------------------------- |
+| Parameter | Type     | Required | Description                                                      |
+| --------- | -------- | -------- | ---------------------------------------------------------------- |
 | `device`  | `string` | Yes      | `controller-left`, `controller-right`, `hand-left`, `hand-right` |
-| `value`   | `number` | Yes      | 0 (released) to 1 (fully pressed/pinched) |
+| `value`   | `number` | Yes      | 0 (released) to 1 (fully pressed/pinched)                        |
 
 ### `xr_select`
 
 Perform a complete select action (press and release). Dispatches `selectstart`, `select`, and `selectend` events.
 
-| Parameter  | Type     | Required | Description                                 |
-| ---------- | -------- | -------- | ------------------------------------------- |
+| Parameter  | Type     | Required | Description                                                      |
+| ---------- | -------- | -------- | ---------------------------------------------------------------- |
 | `device`   | `string` | Yes      | `controller-left`, `controller-right`, `hand-left`, `hand-right` |
-| `duration` | `number` | No       | How long to hold in seconds (default: 0.15) |
+| `duration` | `number` | No       | How long to hold in seconds (default: 0.15)                      |
 
 ## Gamepad
 

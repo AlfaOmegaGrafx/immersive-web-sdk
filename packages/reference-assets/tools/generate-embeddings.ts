@@ -1,6 +1,6 @@
 /**
- * Generate embeddings from parsed chunks using the model archive configured by
- * IWSDK_REFERENCE_MODEL_URL.
+ * Generate embeddings from parsed chunks using the pinned reference model
+ * files downloaded by the producer cache.
  *
  * Usage:
  *   node dist-tools/tools/generate-embeddings.js <chunks-file> <output-file>
@@ -56,7 +56,7 @@ class ProducerEmbeddingService {
       env.allowLocalModels = true;
       (env as { allowRemoteModels?: boolean }).allowRemoteModels = false;
       console.error(
-        `Loading embedding model from warmed archive ${formatReferenceEmbeddingModel(installedModel.metadata)}...`,
+        `Loading embedding model from warmed cache ${formatReferenceEmbeddingModel(installedModel.metadata)}...`,
       );
       this.extractor = await pipeline(
         'feature-extraction',
@@ -70,7 +70,7 @@ class ProducerEmbeddingService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(
-        `Failed to initialize the reference embedding model from IWSDK_REFERENCE_MODEL_URL. ${message}`,
+        `Failed to initialize the reference embedding model. ${message}`,
       );
     }
   }
@@ -169,7 +169,7 @@ async function generateEmbeddings(
 ): Promise<ChunkWithEmbedding[]> {
   const embedder = new ProducerEmbeddingService();
   console.error(
-    '🔄 Initializing embedding model from IWSDK_REFERENCE_MODEL_URL...',
+    '🔄 Initializing the pinned reference embedding model...',
   );
   await embedder.initialize();
   console.error('✅ Model initialized\n');

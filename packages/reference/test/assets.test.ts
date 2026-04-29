@@ -12,26 +12,26 @@ import path from 'path';
 import * as tar from 'tar';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  REFERENCE_MODEL_ONNX_URL,
   getReferenceCacheStatus,
   getReferencePackageVersion,
   resolveReferenceAssets,
   warmupReferenceAssets,
 } from '../src/assets.js';
+import type { ReferenceEmbeddingModelMetadata } from '../src/types.js';
 
 const ASSETS_PACKAGE_NAME = '@iwsdk/reference-assets';
-const TEST_MODEL = {
-  source: 'archive',
-  format: 'transformers-js',
-  archiveSha256: 'model-hash',
-  archiveSize: 123,
-  dtype: 'q8',
-  pooling: 'mean',
-  normalize: true,
+const MODEL_FILES = {
+  'config.json': '{}\n',
+  'tokenizer.json': '{"version":"1.0"}\n',
+  'tokenizer_config.json': '{}\n',
+  'onnx/model_quantized.onnx': 'onnx',
 } as const;
 
 let tempDir: string;
 let workspaceRoot: string;
 let sharedRoot: string;
+let testModel: ReferenceEmbeddingModelMetadata;
 
 async function writeStateFile(payload: Record<string, unknown>) {
   const statePath = path.join(
@@ -48,18 +48,15 @@ async function seedModelDir() {
   const modelDir = path.join(
     sharedRoot,
     'models',
-    TEST_MODEL.archiveSha256,
+    testModel.archiveSha256,
     'model',
   );
   await mkdir(path.join(modelDir, 'onnx'), { recursive: true });
-  await writeFile(path.join(modelDir, 'config.json'), '{}\n', 'utf8');
-  await writeFile(path.join(modelDir, 'tokenizer.json'), '{}\n', 'utf8');
-  await writeFile(path.join(modelDir, 'tokenizer_config.json'), '{}\n', 'utf8');
-  await writeFile(
-    path.join(modelDir, 'onnx', 'model_quantized.onnx'),
-    'onnx',
-    'utf8',
-  );
+  for (const [relativePath, contents] of Object.entries(MODEL_FILES)) {
+    const absolutePath = path.join(modelDir, relativePath);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, contents, 'utf8');
+  }
   return modelDir;
 }
 
@@ -117,13 +114,22 @@ beforeEach(async () => {
   process.env.IWSDK_REFERENCE_WORKSPACE_ROOT = workspaceRoot;
   process.env.IWSDK_REFERENCE_CACHE_DIR = sharedRoot;
   process.env.IWSDK_REFERENCE_ASSETS_BASE_URL = 'https://cdn.example.test';
+  const modelArchive = await createArchive('model', MODEL_FILES);
+  testModel = {
+    source: 'archive',
+    format: 'transformers-js',
+    archiveSha256: modelArchive.sha256,
+    archiveSize: modelArchive.size,
+    dtype: 'q8',
+    pooling: 'mean',
+    normalize: true,
+  };
 });
 
 afterEach(async () => {
   delete process.env.IWSDK_REFERENCE_CACHE_DIR;
   delete process.env.IWSDK_REFERENCE_WORKSPACE_ROOT;
   delete process.env.IWSDK_REFERENCE_ASSETS_BASE_URL;
-  delete process.env.IWSDK_REFERENCE_MODEL_URL;
   vi.unstubAllGlobals();
   await rm(tempDir, { recursive: true, force: true });
 });
@@ -141,10 +147,57 @@ describe('reference cache status', () => {
     expect(status.sharedModelRoot).toBe(path.join(sharedRoot, 'models'));
   });
 
+  it('invalidates legacy reference cache state schemas', async () => {
+    const packageVersion = getReferencePackageVersion();
+    const modelDir = await seedModelDir();
+    const dataDir = path.join(sharedRoot, 'corpora', 'data-hash', 'data');
+    await mkdir(path.join(dataDir, 'sources'), { recursive: true });
+    await writeFile(
+      path.join(dataDir, 'embeddings.json'),
+      `${JSON.stringify(
+        {
+          version: packageVersion,
+          model: testModel,
+          dimensions: 768,
+          iwsdk: [],
+          deps: [],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    await writeStateFile({
+      schemaVersion: 3,
+      packageVersion,
+      assetsPackage: {
+        name: ASSETS_PACKAGE_NAME,
+        version: packageVersion,
+      },
+      status: 'ready',
+      pid: null,
+      manifestUrl: 'https://cdn.example.test/manifest.json',
+      dataDir,
+      dataSha256: 'data-hash',
+      modelDir,
+      modelSha256: testModel.archiveSha256,
+      modelUrl: REFERENCE_MODEL_ONNX_URL,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      error: null,
+    });
+
+    const status = await getReferenceCacheStatus();
+    expect(status.initState).toBe('not_started');
+    expect(status.warmupRequired).toBe(true);
+  });
+
   it('treats stale in-progress state as failed', async () => {
     const packageVersion = getReferencePackageVersion();
     await writeStateFile({
-      schemaVersion: 3,
+      schemaVersion: 4,
       packageVersion,
       assetsPackage: {
         name: ASSETS_PACKAGE_NAME,
@@ -179,7 +232,7 @@ describe('reference cache status', () => {
       `${JSON.stringify(
         {
           version: packageVersion,
-          model: TEST_MODEL,
+          model: testModel,
           dimensions: 768,
           iwsdk: [],
           deps: [],
@@ -191,7 +244,7 @@ describe('reference cache status', () => {
     );
 
     await writeStateFile({
-      schemaVersion: 3,
+      schemaVersion: 4,
       packageVersion,
       assetsPackage: {
         name: ASSETS_PACKAGE_NAME,
@@ -203,8 +256,8 @@ describe('reference cache status', () => {
       dataDir,
       dataSha256: 'data-hash',
       modelDir,
-      modelSha256: TEST_MODEL.archiveSha256,
-      modelUrl: 'https://cdn.example.test/model.tgz',
+      modelSha256: testModel.archiveSha256,
+      modelUrl: REFERENCE_MODEL_ONNX_URL,
       startedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -214,7 +267,7 @@ describe('reference cache status', () => {
     const resolved = await resolveReferenceAssets();
     expect(resolved.dataDir).toBe(dataDir);
     expect(resolved.modelDir).toBe(modelDir);
-    expect(resolved.model).toEqual(TEST_MODEL);
+    expect(resolved.model).toEqual(testModel);
   });
 
   it('allows a warmed custom corpus source when no explicit override is set', async () => {
@@ -227,7 +280,7 @@ describe('reference cache status', () => {
       `${JSON.stringify(
         {
           version: packageVersion,
-          model: TEST_MODEL,
+          model: testModel,
           dimensions: 768,
           iwsdk: [],
           deps: [],
@@ -239,7 +292,7 @@ describe('reference cache status', () => {
     );
 
     await writeStateFile({
-      schemaVersion: 3,
+      schemaVersion: 4,
       packageVersion,
       assetsPackage: {
         name: ASSETS_PACKAGE_NAME,
@@ -252,9 +305,8 @@ describe('reference cache status', () => {
       dataDir,
       dataSha256: 'data-hash',
       modelDir,
-      modelSha256: TEST_MODEL.archiveSha256,
-      modelUrl:
-        'http://127.0.0.1:8791/packages/reference-assets/model-dist/model.tgz',
+      modelSha256: testModel.archiveSha256,
+      modelUrl: REFERENCE_MODEL_ONNX_URL,
       startedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -268,23 +320,13 @@ describe('reference cache status', () => {
     expect(status.warmupRequired).toBe(false);
   });
 
-  it('downloads both corpus and model archives during warmup', async () => {
+  it('downloads the corpus archive and pinned model files during warmup', async () => {
     const packageVersion = getReferencePackageVersion();
-    const modelArchive = await createArchive('model', {
-      'config.json': '{}\n',
-      'tokenizer.json': '{}\n',
-      'tokenizer_config.json': '{}\n',
-      'onnx/model_quantized.onnx': 'onnx',
-    });
     const dataArchive = await createArchive('data', {
       'embeddings.json': `${JSON.stringify(
         {
           version: packageVersion,
-          model: {
-            ...TEST_MODEL,
-            archiveSha256: modelArchive.sha256,
-            archiveSize: modelArchive.size,
-          },
+          model: testModel,
           dimensions: 768,
           iwsdk: [],
           deps: [],
@@ -295,8 +337,6 @@ describe('reference cache status', () => {
       'sources/.keep': '',
     });
 
-    process.env.IWSDK_REFERENCE_MODEL_URL =
-      'https://models.example.test/model.tgz';
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url === 'https://cdn.example.test/manifest.json') {
@@ -328,12 +368,25 @@ describe('reference cache status', () => {
           },
         });
       }
-      if (url === 'https://models.example.test/model.tgz') {
-        return new Response(modelArchive.buffer, {
+      if (url === REFERENCE_MODEL_ONNX_URL) {
+        return new Response(MODEL_FILES['onnx/model_quantized.onnx'], {
           status: 200,
           headers: {
-            'content-length': String(modelArchive.size),
+            'content-length': String(
+              MODEL_FILES['onnx/model_quantized.onnx'].length,
+            ),
           },
+        });
+      }
+      if (url.endsWith('/config.json')) {
+        return new Response(MODEL_FILES['config.json'], { status: 200 });
+      }
+      if (url.endsWith('/tokenizer.json')) {
+        return new Response(MODEL_FILES['tokenizer.json'], { status: 200 });
+      }
+      if (url.endsWith('/tokenizer_config.json')) {
+        return new Response(MODEL_FILES['tokenizer_config.json'], {
+          status: 200,
         });
       }
       return new Response('not found', { status: 404 });
@@ -344,40 +397,35 @@ describe('reference cache status', () => {
 
     expect(status.initState).toBe('ready');
     expect(status.dataSha256).toBe(dataArchive.sha256);
-    expect(status.modelSha256).toBe(modelArchive.sha256);
-    expect(status.modelUrl).toBe('https://models.example.test/model.tgz');
+    expect(status.modelSha256).toBe(testModel.archiveSha256);
+    expect(status.modelUrl).toBe(REFERENCE_MODEL_ONNX_URL);
     expect(status.dataDir).toBe(
       path.join(sharedRoot, 'corpora', dataArchive.sha256, 'data'),
     );
     expect(status.modelDir).toBe(
-      path.join(sharedRoot, 'models', modelArchive.sha256, 'model'),
+      path.join(sharedRoot, 'models', testModel.archiveSha256, 'model'),
     );
     expect(fetchMock).toHaveBeenCalledWith(
       'https://cdn.example.test/manifest.json',
     );
     expect(fetchMock).toHaveBeenCalledWith('https://cdn.example.test/data.tgz');
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://models.example.test/model.tgz',
-    );
+    expect(fetchMock).toHaveBeenCalledWith(REFERENCE_MODEL_ONNX_URL);
   });
 
-  it('fails warmup clearly when the model URL is missing', async () => {
+  it('repairs a corrupted cached model directory during warmup', async () => {
     const packageVersion = getReferencePackageVersion();
-    const modelArchive = await createArchive('model', {
-      'config.json': '{}\n',
-      'tokenizer.json': '{}\n',
-      'tokenizer_config.json': '{}\n',
-      'onnx/model_quantized.onnx': 'onnx',
-    });
+    const corruptModelDir = await seedModelDir();
+    await writeFile(
+      path.join(corruptModelDir, 'config.json'),
+      '{"corrupt":true}\n',
+      'utf8',
+    );
+
     const dataArchive = await createArchive('data', {
       'embeddings.json': `${JSON.stringify(
         {
           version: packageVersion,
-          model: {
-            ...TEST_MODEL,
-            archiveSha256: modelArchive.sha256,
-            archiveSize: modelArchive.size,
-          },
+          model: testModel,
           dimensions: 768,
           iwsdk: [],
           deps: [],
@@ -388,7 +436,6 @@ describe('reference cache status', () => {
       'sources/.keep': '',
     });
 
-    delete process.env.IWSDK_REFERENCE_MODEL_URL;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url === 'https://cdn.example.test/manifest.json') {
@@ -420,12 +467,107 @@ describe('reference cache status', () => {
           },
         });
       }
+      if (url === REFERENCE_MODEL_ONNX_URL) {
+        return new Response(MODEL_FILES['onnx/model_quantized.onnx'], {
+          status: 200,
+          headers: {
+            'content-length': String(
+              MODEL_FILES['onnx/model_quantized.onnx'].length,
+            ),
+          },
+        });
+      }
+      if (url.endsWith('/config.json')) {
+        return new Response(MODEL_FILES['config.json'], { status: 200 });
+      }
+      if (url.endsWith('/tokenizer.json')) {
+        return new Response(MODEL_FILES['tokenizer.json'], { status: 200 });
+      }
+      if (url.endsWith('/tokenizer_config.json')) {
+        return new Response(MODEL_FILES['tokenizer_config.json'], {
+          status: 200,
+        });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const status = await warmupReferenceAssets();
+    const repairedConfig = await readFile(
+      path.join(status.modelDir ?? '', 'config.json'),
+      'utf8',
+    );
+
+    expect(status.initState).toBe('ready');
+    expect(repairedConfig).toBe(MODEL_FILES['config.json']);
+  });
+
+  it('fails warmup clearly when the pinned ONNX download fails', async () => {
+    const packageVersion = getReferencePackageVersion();
+    const dataArchive = await createArchive('data', {
+      'embeddings.json': `${JSON.stringify(
+        {
+          version: packageVersion,
+          model: testModel,
+          dimensions: 768,
+          iwsdk: [],
+          deps: [],
+        },
+        null,
+        2,
+      )}\n`,
+      'sources/.keep': '',
+    });
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === 'https://cdn.example.test/manifest.json') {
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 3,
+            referenceVersion: packageVersion,
+            assetsPackage: {
+              name: ASSETS_PACKAGE_NAME,
+              version: packageVersion,
+            },
+            generatedAt: new Date().toISOString(),
+            assets: {
+              data: {
+                file: 'data.tgz',
+                sha256: dataArchive.sha256,
+                size: dataArchive.size,
+              },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === 'https://cdn.example.test/data.tgz') {
+        return new Response(dataArchive.buffer, {
+          status: 200,
+          headers: {
+            'content-length': String(dataArchive.size),
+          },
+        });
+      }
+      if (url === REFERENCE_MODEL_ONNX_URL) {
+        return new Response('not found', { status: 404 });
+      }
+      if (url.endsWith('/config.json')) {
+        return new Response('{}\n', { status: 200 });
+      }
+      if (url.endsWith('/tokenizer.json')) {
+        return new Response('{"version":"1.0"}\n', { status: 200 });
+      }
+      if (url.endsWith('/tokenizer_config.json')) {
+        return new Response('{}\n', { status: 200 });
+      }
       return new Response('not found', { status: 404 });
     });
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(warmupReferenceAssets()).rejects.toThrow(
-      'IWSDK_REFERENCE_MODEL_URL',
+      REFERENCE_MODEL_ONNX_URL,
     );
   });
 
@@ -440,7 +582,7 @@ describe('reference cache status', () => {
         {
           version: packageVersion,
           model: {
-            ...TEST_MODEL,
+            ...testModel,
             archiveSha256: 'different-model-hash',
           },
           dimensions: 768,
@@ -454,7 +596,7 @@ describe('reference cache status', () => {
     );
 
     await writeStateFile({
-      schemaVersion: 3,
+      schemaVersion: 4,
       packageVersion,
       assetsPackage: {
         name: ASSETS_PACKAGE_NAME,
@@ -466,8 +608,8 @@ describe('reference cache status', () => {
       dataDir,
       dataSha256: 'data-hash',
       modelDir,
-      modelSha256: TEST_MODEL.archiveSha256,
-      modelUrl: 'https://cdn.example.test/model.tgz',
+      modelSha256: testModel.archiveSha256,
+      modelUrl: REFERENCE_MODEL_ONNX_URL,
       startedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

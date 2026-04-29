@@ -5,27 +5,66 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { mkdir, rm, writeFile } from 'fs/promises';
+import { createHash } from 'crypto';
+import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import * as tar from 'tar';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getReferencePackageVersion } from '../src/assets.js';
+import {
+  REFERENCE_MODEL_ONNX_URL,
+  getReferencePackageVersion,
+} from '../src/assets.js';
 import { FileService } from '../src/files.js';
+import type { ReferenceEmbeddingModelMetadata } from '../src/types.js';
 
 const ASSETS_PACKAGE_NAME = '@iwsdk/reference-assets';
-const TEST_MODEL = {
-  source: 'archive',
-  format: 'transformers-js',
-  archiveSha256: 'model-hash',
-  archiveSize: 123,
-  dtype: 'q8',
-  pooling: 'mean',
-  normalize: true,
+const MODEL_FILES = {
+  'config.json': '{}\n',
+  'tokenizer.json': '{"version":"1.0"}\n',
+  'tokenizer_config.json': '{}\n',
+  'onnx/model_quantized.onnx': 'onnx',
 } as const;
 
 let tempDir: string;
 let workspaceRoot: string;
 let sharedRoot: string;
+let testModel: ReferenceEmbeddingModelMetadata;
+
+async function createArchive(
+  rootName: string,
+  files: Record<string, string>,
+): Promise<{ sha256: string; size: number }> {
+  const sourceRoot = path.join(tempDir, `${rootName}-source`);
+  const archivePath = path.join(tempDir, `${rootName}.tgz`);
+  const archiveRoot = path.join(sourceRoot, rootName);
+
+  await rm(sourceRoot, { recursive: true, force: true });
+  await mkdir(archiveRoot, { recursive: true });
+  for (const [relativePath, contents] of Object.entries(files)) {
+    const absolutePath = path.join(archiveRoot, relativePath);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, contents, 'utf8');
+  }
+
+  await tar.c(
+    {
+      cwd: sourceRoot,
+      file: archivePath,
+      gzip: true,
+      portable: true,
+      noPax: true,
+      mtime: new Date(0),
+    },
+    [rootName],
+  );
+
+  const buffer = await readFile(archivePath);
+  return {
+    sha256: createHash('sha256').update(buffer).digest('hex'),
+    size: buffer.length,
+  };
+}
 
 async function seedReadyCache() {
   const packageVersion = getReferencePackageVersion();
@@ -33,7 +72,7 @@ async function seedReadyCache() {
   const modelDir = path.join(
     sharedRoot,
     'models',
-    TEST_MODEL.archiveSha256,
+    testModel.archiveSha256,
     'model',
   );
   await mkdir(
@@ -51,7 +90,7 @@ async function seedReadyCache() {
     `${JSON.stringify(
       {
         version: packageVersion,
-        model: TEST_MODEL,
+          model: testModel,
         dimensions: 768,
         iwsdk: [],
         deps: [],
@@ -79,14 +118,11 @@ async function seedReadyCache() {
     'export interface Vector3 {}\n',
     'utf8',
   );
-  await writeFile(path.join(modelDir, 'config.json'), '{}\n', 'utf8');
-  await writeFile(path.join(modelDir, 'tokenizer.json'), '{}\n', 'utf8');
-  await writeFile(path.join(modelDir, 'tokenizer_config.json'), '{}\n', 'utf8');
-  await writeFile(
-    path.join(modelDir, 'onnx', 'model_quantized.onnx'),
-    'onnx',
-    'utf8',
-  );
+  for (const [relativePath, contents] of Object.entries(MODEL_FILES)) {
+    const absolutePath = path.join(modelDir, relativePath);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, contents, 'utf8');
+  }
 
   const statePath = path.join(
     workspaceRoot,
@@ -99,7 +135,7 @@ async function seedReadyCache() {
     statePath,
     `${JSON.stringify(
       {
-        schemaVersion: 3,
+        schemaVersion: 4,
         packageVersion,
         assetsPackage: {
           name: ASSETS_PACKAGE_NAME,
@@ -111,8 +147,8 @@ async function seedReadyCache() {
         dataDir,
         dataSha256: 'data-hash',
         modelDir,
-        modelSha256: TEST_MODEL.archiveSha256,
-        modelUrl: 'https://cdn.example.test/model.tgz',
+        modelSha256: testModel.archiveSha256,
+        modelUrl: REFERENCE_MODEL_ONNX_URL,
         startedAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -143,6 +179,16 @@ beforeEach(async () => {
   process.env.IWSDK_REFERENCE_WORKSPACE_ROOT = workspaceRoot;
   process.env.IWSDK_REFERENCE_CACHE_DIR = sharedRoot;
   process.env.IWSDK_REFERENCE_ASSETS_BASE_URL = 'https://cdn.example.test';
+  const modelArchive = await createArchive('model', MODEL_FILES);
+  testModel = {
+    source: 'archive',
+    format: 'transformers-js',
+    archiveSha256: modelArchive.sha256,
+    archiveSize: modelArchive.size,
+    dtype: 'q8',
+    pooling: 'mean',
+    normalize: true,
+  };
   await seedReadyCache();
 });
 

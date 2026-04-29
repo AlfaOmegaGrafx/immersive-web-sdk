@@ -7,6 +7,10 @@
 # Build an SDK bundle directory ready for distribution (e.g., S3 upload).
 # The output can be used with `npx @iwsdk/create my-app --from ./sdk-bundle`
 # or `--from https://my-cdn.example.com/sdk-bundle/`.
+# Reference corpus artifacts stay external:
+#   - host `packages/reference-assets/dist/` separately when not relying on npm/unpkg
+#   - the pinned reference model file URLs are baked into the SDK, so warmup still
+#     needs outbound access to those public URLs unless the shared cache is pre-warmed
 #
 # Output structure:
 #   sdk-bundle/
@@ -39,7 +43,7 @@ mkdir -p "$OUTPUT_DIR/packages"
 # 1) Build all SDK packages
 ##############################################
 echo "🔨 Building SDK packages..."
-"$BASE_DIR/scripts/build-tgz.sh"
+"$BASE_DIR/scripts/build-tgz.sh" --skip-reference-assets
 
 ##############################################
 # 2) Collect @iwsdk/* tgz files into packages/
@@ -58,6 +62,12 @@ for TGZ in "$PACKAGES_DIR"/*/*.tgz; do
       continue
     fi
 
+    # Skip @iwsdk/reference-assets — reference warmup expects a separately hosted corpus payload
+    if [ "$SUBDIR" = "reference-assets" ]; then
+      echo "   ⏭️  skipping packages/$SUBDIR/$BASENAME (external reference warmup artifact)"
+      continue
+    fi
+
     mkdir -p "$OUTPUT_DIR/packages/$SUBDIR"
     cp -f "$TGZ" "$OUTPUT_DIR/packages/$SUBDIR/$BASENAME"
     echo "   ➕ packages/$SUBDIR/$BASENAME"
@@ -65,7 +75,13 @@ for TGZ in "$PACKAGES_DIR"/*/*.tgz; do
 done
 
 ##############################################
-# 3) Copy starter-assets (recipes + assets)
+# 3) Rebuild starter-assets outputs
+##############################################
+echo "🔨 Building starter-assets..."
+pnpm --filter @iwsdk/starter-assets run build
+
+##############################################
+# 4) Copy starter-assets (recipes + assets)
 ##############################################
 echo "📥 Copying starter-assets..."
 
@@ -87,7 +103,7 @@ else
 fi
 
 ##############################################
-# 4) Generate bundle.json manifest
+# 5) Generate bundle.json manifest
 ##############################################
 echo "📝 Generating bundle.json manifest..."
 
@@ -140,3 +156,11 @@ echo "   Remote: Upload sdk-bundle/ to S3, then:"
 echo "           npx @iwsdk/create my-app --from https://my-cdn.example.com/sdk-bundle/"
 echo "   Local:  npx serve ./sdk-bundle -l 3456"
 echo "           npx @iwsdk/create my-app --from http://localhost:3456"
+echo ""
+echo "🧠 Reference note:"
+echo "   sdk-bundle/ excludes the reference corpus payload."
+echo "   Host packages/reference-assets/dist/ separately when not relying on npm/unpkg"
+echo "   before running 'npx iwsdk reference warmup' inside bundle-created apps."
+echo "   The pinned reference model file URLs are already baked into the SDK, so"
+echo "   warmup still requires access to those public URLs unless the shared cache"
+echo "   is pre-warmed."

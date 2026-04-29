@@ -9,6 +9,7 @@ import { existsSync, readFileSync, realpathSync } from 'fs';
 import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import path from 'path';
 import {
+  isRuntimeBrowserCommandReady,
   IWSDK_RUNTIME_LAUNCH_PATH,
   IWSDK_RUNTIME_LOGS_DIR,
   IWSDK_RUNTIME_SESSION_PATH,
@@ -132,18 +133,29 @@ export function normalizeWorkspaceRoot(workspaceRoot: string): string {
 }
 
 export function getRuntimeSessionFilePath(workspaceRoot: string): string {
-  return path.join(normalizeWorkspaceRoot(workspaceRoot), IWSDK_RUNTIME_SESSION_PATH);
+  return path.join(
+    normalizeWorkspaceRoot(workspaceRoot),
+    IWSDK_RUNTIME_SESSION_PATH,
+  );
 }
 
 export function getRuntimeLaunchFilePath(workspaceRoot: string): string {
-  return path.join(normalizeWorkspaceRoot(workspaceRoot), IWSDK_RUNTIME_LAUNCH_PATH);
+  return path.join(
+    normalizeWorkspaceRoot(workspaceRoot),
+    IWSDK_RUNTIME_LAUNCH_PATH,
+  );
 }
 
 export function getRuntimeLogsDir(workspaceRoot: string): string {
-  return path.join(normalizeWorkspaceRoot(workspaceRoot), IWSDK_RUNTIME_LOGS_DIR);
+  return path.join(
+    normalizeWorkspaceRoot(workspaceRoot),
+    IWSDK_RUNTIME_LOGS_DIR,
+  );
 }
 
-export async function ensureRuntimeLogsDir(workspaceRoot: string): Promise<string> {
+export async function ensureRuntimeLogsDir(
+  workspaceRoot: string,
+): Promise<string> {
   const logsDir = getRuntimeLogsDir(workspaceRoot);
   await mkdir(logsDir, { recursive: true });
   return logsDir;
@@ -168,14 +180,20 @@ export function isIwsdkAppRoot(dirPath: string): boolean {
     return false;
   }
 
-  if (!VITE_CONFIG_NAMES.some((name) => existsSync(path.join(normalizedDir, name)))) {
+  if (
+    !VITE_CONFIG_NAMES.some((name) =>
+      existsSync(path.join(normalizedDir, name)),
+    )
+  ) {
     return false;
   }
 
   return hasIwsdkDependency(readPackageManifest(normalizedDir));
 }
 
-export function findNearestIwsdkAppRoot(startDir = process.cwd()): string | null {
+export function findNearestIwsdkAppRoot(
+  startDir = process.cwd(),
+): string | null {
   let current = normalizeWorkspaceRoot(startDir);
 
   while (true) {
@@ -195,7 +213,9 @@ export async function registerRuntimeSession(
   input: RegisterRuntimeSessionInput,
 ): Promise<RuntimeSession> {
   const workspaceRoot = normalizeWorkspaceRoot(input.workspaceRoot);
-  const existing = await readJsonFile<RuntimeSession>(getRuntimeSessionFilePath(workspaceRoot));
+  const existing = await readJsonFile<RuntimeSession>(
+    getRuntimeSessionFilePath(workspaceRoot),
+  );
   const now = new Date().toISOString();
   const session: RuntimeSession = {
     schemaVersion: IWSDK_RUNTIME_STATE_SCHEMA_VERSION,
@@ -234,7 +254,9 @@ export async function setRuntimeSessionBrowserState(
   return writeRuntimeSession(normalizedWorkspaceRoot, session);
 }
 
-export async function unregisterRuntimeSession(workspaceRoot: string): Promise<void> {
+export async function unregisterRuntimeSession(
+  workspaceRoot: string,
+): Promise<void> {
   await removeIfExists(getRuntimeSessionFilePath(workspaceRoot));
 }
 
@@ -277,7 +299,9 @@ export async function setLaunchMetadata(
   return metadata;
 }
 
-export async function clearLaunchMetadata(workspaceRoot: string): Promise<void> {
+export async function clearLaunchMetadata(
+  workspaceRoot: string,
+): Promise<void> {
   await removeIfExists(getRuntimeLaunchFilePath(workspaceRoot));
 }
 
@@ -314,6 +338,7 @@ export async function getWorkspaceRuntimeState(
     running: Boolean(session),
     starting: !session && Boolean(launch),
     browserConnected: Boolean(session?.browser?.connected),
+    browserCommandReady: isRuntimeBrowserCommandReady(session),
     session,
     launch,
   };

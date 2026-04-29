@@ -345,22 +345,24 @@ When planning any new feature or system, ALWAYS invoke `/iwsdk-planner` first to
 
 ## MCP Tools Available
 
-### IWSDK-RAG (Code Intelligence)
+### IWSDK Reference (Code Intelligence)
 
 Semantic code search and API lookup for IWSDK, elics ECS, and dependencies.
 
+Starter projects install `@iwsdk/reference` by default so these tools are available locally, but they only become usable after reference warmup. Run `npx iwsdk reference warmup` once to download the pinned model and corpus. Set `IWSDK_REFERENCE_ASSETS_BASE_URL` too when you are using an internal or unpublished corpus payload instead of the published `@iwsdk/reference-assets` package. The pinned model file URLs themselves are baked into the SDK, so warmup still requires access to those public URLs unless the shared cache has already been pre-warmed.
+
 | Tool                                         | Purpose                      | When to Use                                              |
 | -------------------------------------------- | ---------------------------- | -------------------------------------------------------- |
-| `mcp__iwsdk-rag-local__search_code`          | Semantic search across IWSDK | Finding code by description ("how to create VR session") |
-| `mcp__iwsdk-rag-local__get_api_reference`    | Quick API lookup by name     | When you know the class/function name                    |
-| `mcp__iwsdk-rag-local__find_by_relationship` | Find code by relationships   | Classes that extend/implement something                  |
-| `mcp__iwsdk-rag-local__list_ecs_components`  | List all ECS components      | Discovering available components                         |
-| `mcp__iwsdk-rag-local__list_ecs_systems`     | List all ECS systems         | Discovering available systems                            |
-| `mcp__iwsdk-rag-local__find_usage_examples`  | Find real-world examples     | Understanding how to use an API                          |
+| `mcp__iwsdk-reference__search_code`          | Semantic search across IWSDK | Finding code by description ("how to create VR session") |
+| `mcp__iwsdk-reference__get_api_reference`    | Quick API lookup by name     | When you know the class/function name                    |
+| `mcp__iwsdk-reference__find_by_relationship` | Find code by relationships   | Classes that extend/implement something                  |
+| `mcp__iwsdk-reference__list_ecs_components`  | List all ECS components      | Discovering available components                         |
+| `mcp__iwsdk-reference__list_ecs_systems`     | List all ECS systems         | Discovering available systems                            |
+| `mcp__iwsdk-reference__find_usage_examples`  | Find real-world examples     | Understanding how to use an API                          |
 
 ### IWER (Immersive Web Emulation Runtime)
 
-WebXR emulator control for testing without a headset. Starter projects expose these tools under `mcp__iwsdk__`.
+WebXR emulator control for testing without a headset. Starter projects expose these tools under `mcp__iwsdk-runtime__`.
 
 **Session**
 
@@ -429,10 +431,10 @@ WebXR emulator control for testing without a headset. Starter projects expose th
 **Connection check — always call first:**
 
 ```
-mcp__iwsdk__xr_get_session_status
+mcp__iwsdk-runtime__xr_get_session_status
 ```
 
-If your tool environment lazily loads MCP schemas, hydrate the `mcp__iwsdk__*` tool definitions first. If MCP tools are still deferred, use the CLI (`npx iwsdk xr status`) for the same check.
+If your tool environment lazily loads MCP schemas, hydrate the `mcp__iwsdk-runtime__*` tool definitions first. If MCP tools are still deferred, use the CLI (`npx iwsdk xr status`) for the same check.
 
 If this returns a successful connection, the dev server is ALREADY running. Do NOT start another one.
 
@@ -440,7 +442,7 @@ If this returns a successful connection, the dev server is ALREADY running. Do N
 
 - Dev server not running → Start with `npm run dev` (CLI-managed) or `npx iwsdk dev up`
 - Browser tab in background → Bring to foreground (Chrome throttles background tabs)
-- Session not active → Use `mcp__iwsdk__xr_accept_session`
+- Session not active → Use `mcp__iwsdk-runtime__xr_accept_session`
 
 ### hzdb (Meta Quest Device Tools)
 
@@ -475,7 +477,7 @@ These are device action tools, not IWSDK development tools. Useful for checking 
 | `search_docs`          | Search Meta Quest developer documentation  |
 | `fetch_meta_quest_doc` | Fetch full content of a documentation page |
 
-**Important:** Only use these for Quest platform questions (distribution policies, WebXR spec details, device capabilities). For IWSDK API and development questions, use `iwsdk-rag-local` instead — it returns actual source code and is significantly more accurate.
+**Important:** Only use these for Quest platform questions (distribution policies, WebXR spec details, device capabilities). For IWSDK API and development questions, use `iwsdk-reference` instead — it returns actual source code and is significantly more accurate.
 
 ---
 
@@ -716,28 +718,28 @@ Type errors will prevent systems from initializing properly, but may not show er
 **BEFORE starting a dev server, ALWAYS check if one is already running:**
 
 ```
-mcp__iwsdk__xr_get_session_status
+mcp__iwsdk-runtime__xr_get_session_status
 ```
 
-If your tool environment lazily loads MCP schemas, hydrate the `mcp__iwsdk__*` tool definitions first. If MCP tools are still deferred, use `npx iwsdk xr status` instead.
+If your tool environment lazily loads MCP schemas, hydrate the `mcp__iwsdk-runtime__*` tool definitions first. If MCP tools are still deferred, use `npx iwsdk xr status` instead.
 
 If this returns a successful connection, the dev server is already running. Do NOT start another one.
 
 1. **Type check first:** `npx tsc --noEmit` - fix any errors before proceeding
-2. Check IWER status first: `mcp__iwsdk__xr_get_session_status` (or `npx iwsdk xr status` if MCP schemas are still deferred)
+2. Check IWER status first: `mcp__iwsdk-runtime__xr_get_session_status` (or `npx iwsdk xr status` if MCP schemas are still deferred)
 3. If not connected, start the CLI-managed dev server: `npm run dev`
 4. If you need the resolved runtime URL or port, run `npx iwsdk dev status`
-5. Enter XR: `mcp__iwsdk__xr_accept_session`
+5. Enter XR: `mcp__iwsdk-runtime__xr_accept_session`
 6. Test interactions with controller tools
 
 ### Debugging Missing Features
 
 If something isn't appearing or working but no errors show in console:
 
-1. **Don't use level filter for console logs** — call `mcp__iwsdk__browser_get_console_logs` with just `count`, not `level` filter, as you may miss important errors
+1. **Don't use level filter for console logs** — call `mcp__iwsdk-runtime__browser_get_console_logs` with just `count`, not `level` filter, as you may miss important errors
 2. **Run type check** — `npx tsc --noEmit` often reveals issues that don't appear as runtime errors
-3. **Check scene hierarchy** — use `mcp__iwsdk__scene_get_hierarchy` to verify entities exist and find entity indices
+3. **Check scene hierarchy** — use `mcp__iwsdk-runtime__scene_get_hierarchy` to verify entities exist and find entity indices
 4. **Reload and check logs immediately** — some errors only appear during initialization
-5. **Inspect ECS state** — use `mcp__iwsdk__ecs_find_entities` to check if entities have expected components, then `mcp__iwsdk__ecs_query_entity` to read their values
-6. **Diff before/after** — take `mcp__iwsdk__ecs_snapshot` before and after an action to see exactly what changed (or didn't)
-7. **Isolate systems** — use `mcp__iwsdk__ecs_toggle_system` to pause suspect systems one at a time to find which causes the issue
+5. **Inspect ECS state** — use `mcp__iwsdk-runtime__ecs_find_entities` to check if entities have expected components, then `mcp__iwsdk-runtime__ecs_query_entity` to read their values
+6. **Diff before/after** — take `mcp__iwsdk-runtime__ecs_snapshot` before and after an action to see exactly what changed (or didn't)
+7. **Isolate systems** — use `mcp__iwsdk-runtime__ecs_toggle_system` to pause suspect systems one at a time to find which causes the issue

@@ -8,7 +8,9 @@
 import type { CliOptionValue, CliOptions, ParsedArgv } from './cli-types.js';
 
 function toCamelCase(flagName: string): string {
-  return flagName.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
+  return flagName.replace(/-([a-z])/g, (_, letter: string) =>
+    letter.toUpperCase(),
+  );
 }
 
 export function parseArgv(argv: string[]): ParsedArgv {

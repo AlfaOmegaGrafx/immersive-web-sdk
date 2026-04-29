@@ -8,6 +8,8 @@
     "dev:runtime": "vite",
     "dev:down": "iwsdk dev down",
     "dev:status": "iwsdk dev status",
+    "reference:status": "iwsdk reference status",
+    "reference:warmup": "iwsdk reference warmup",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -16,7 +18,7 @@
     "three": "npm:super-three@0.181.0"
   },
   "devDependencies": {
-    "@felixtz/iwsdk-rag-mcp": "^0.3.1",
+    "@iwsdk/reference": "file:../packages/reference/iwsdk-reference.tgz",
     "@iwsdk/cli": "file:../packages/cli/iwsdk-cli.tgz",
     "@iwsdk/vite-plugin-dev": "file:../packages/vite-plugin-dev/iwsdk-vite-plugin-dev.tgz",
     "@iwsdk/vite-plugin-metaspatial": "file:../packages/vite-plugin-metaspatial/iwsdk-vite-plugin-metaspatial.tgz",

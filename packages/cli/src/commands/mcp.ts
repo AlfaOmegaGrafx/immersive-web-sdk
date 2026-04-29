@@ -16,12 +16,17 @@ export async function handleMcpInspect(
   options: CliOptions,
   io: ResolvedCliIo,
 ): Promise<CliSuccess<unknown>> {
-  const workspaceRoot = await detectWorkspaceForStatus(io.cwd, options.workspace);
+  const workspaceRoot = await detectWorkspaceForStatus(
+    io.cwd,
+    options.workspace,
+  );
   const session = workspaceRoot ? await getRuntimeSession(workspaceRoot) : null;
   const requestedTool = typeof options.tool === 'string' ? options.tool : null;
 
   if (requestedTool) {
-    const operation = RUNTIME_OPERATIONS.find((entry) => entry.mcpName === requestedTool);
+    const operation = RUNTIME_OPERATIONS.find(
+      (entry) => entry.mcpName === requestedTool,
+    );
     if (!operation) {
       throw new Error(
         `Unknown runtime tool "${requestedTool}". Available: ${RUNTIME_OPERATIONS.map((entry) => entry.mcpName).join(', ')}`,
@@ -58,12 +63,13 @@ export async function handleMcpStdio(
   io: ResolvedCliIo,
 ): Promise<null> {
   await startRuntimeMcpStdioServer({
-    serverName: 'iwsdk',
+    serverName: 'iwsdk-runtime',
     version: '1.0.0',
     resolveSession: async () => {
       const workspaceRoot = await resolveWorkspaceRoot({
         cwd: io.cwd,
-        workspace: typeof options.workspace === 'string' ? options.workspace : undefined,
+        workspace:
+          typeof options.workspace === 'string' ? options.workspace : undefined,
         requireRunning: true,
       });
       return getRuntimeSession(workspaceRoot);
