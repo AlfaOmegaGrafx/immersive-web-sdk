@@ -41,7 +41,7 @@ import { VERSION, NODE_ENGINE } from './version.js';
 
 type CliOptions = {
   yes?: boolean;
-  from?: string;
+  canary?: string | boolean;
   mode?: 'vr' | 'ar';
   language?: 'ts' | 'js';
   metaspatial?: boolean;
@@ -99,7 +99,7 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
     .description('Official CLI for creating Immersive Web SDK projects')
     .version(version)
     .argument('[name]', 'Project name')
-    .option('--from <url>', 'Use SDK bundle from HTTP(S) URL')
+    .option('--canary [url]', 'Use canary SDK bundle (optionally from a custom URL)')
     .option('-y, --yes', 'Use defaults and skip prompts')
     .option('--mode <mode>', 'Experience mode: vr or ar', 'vr')
     .option('--language <lang>', 'Language: ts or js', 'ts')
@@ -162,14 +162,14 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
       );
       process.exit(1);
     }
-    if (cliOpts.from) {
+    if (typeof cliOpts.canary === 'string') {
       const isUrl =
-        cliOpts.from.startsWith('http://') ||
-        cliOpts.from.startsWith('https://');
+        cliOpts.canary.startsWith('http://') ||
+        cliOpts.canary.startsWith('https://');
       if (!isUrl) {
         console.error(
           chalk.red(
-            `--from must be an HTTP or HTTPS URL. Got: "${cliOpts.from}".`,
+            `--canary URL must be an HTTP or HTTPS URL. Got: "${cliOpts.canary}".`,
           ),
         );
         process.exit(1);
@@ -315,7 +315,7 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
       );
     }
 
-    const source = resolveSource(cliOpts.from);
+    const source = resolveSource(cliOpts.canary);
 
     // Prepare source (downloads tgz files for remote bundles)
     if (source.isBundleMode) {

@@ -12,6 +12,7 @@ import {
   NpmSource,
   BundleSource,
   SDK_PACKAGES_DIR,
+  DEFAULT_BUNDLE_URL,
 } from '../src/source.js';
 import type { BundleManifest } from '../src/source.js';
 
@@ -26,6 +27,16 @@ describe('resolveSource', () => {
     expect(source).toBeInstanceOf(NpmSource);
   });
 
+  it('returns NpmSource when flag is false', () => {
+    const source = resolveSource(false);
+    expect(source).toBeInstanceOf(NpmSource);
+  });
+
+  it('returns BundleSource with DEFAULT_BUNDLE_URL when flag is true (bare --canary)', () => {
+    const source = resolveSource(true);
+    expect(source).toBeInstanceOf(BundleSource);
+  });
+
   it('returns BundleSource when an http URL is given', () => {
     const source = resolveSource('http://example.com/bundle');
     expect(source).toBeInstanceOf(BundleSource);
@@ -38,7 +49,7 @@ describe('resolveSource', () => {
 
   it('throws when a local path is given', () => {
     expect(() => resolveSource('/some/local/path')).toThrow(
-      '--from must be an HTTP or HTTPS URL',
+      'Bundle URL must be an HTTP or HTTPS URL',
     );
   });
 });
@@ -191,7 +202,7 @@ describe('BundleSource', () => {
 
   it('throws on non-HTTP URL', () => {
     expect(() => new BundleSource('/local/path')).toThrow(
-      '--from must be an HTTP or HTTPS URL',
+      'Bundle URL must be an HTTP or HTTPS URL',
     );
   });
 
@@ -269,7 +280,7 @@ describe('BundleSource', () => {
 });
 
 describe('BundleSource.resolveRecipeUrls', () => {
-  it('prepends --from base URL to relative url edits', () => {
+  it('prepends bundle base URL to relative url edits', () => {
     const source = new BundleSource('https://my-cdn.example.com/sdk');
     const recipe: Recipe = {
       name: 'test',

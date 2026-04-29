@@ -37,7 +37,7 @@
   "dependencies": {
     "@iwer/devui": "^2.2.0",
     "@iwer/sem": "^0.2.5",
-    "iwer": "^2.2.0",
+    "iwer": "^2.2.1",
     "playwright": "^1.58.2",
     "sharp": "^0.33.0",
     "ws": "^8.18.0"

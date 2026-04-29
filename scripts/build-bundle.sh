@@ -5,8 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 
 # Build an SDK bundle directory ready for distribution (e.g., S3 upload).
-# The output can be used with `npx @iwsdk/create my-app --from ./sdk-bundle`
-# or `--from https://my-cdn.example.com/sdk-bundle/`.
+# The output can be used with `npx @iwsdk/create my-app --canary`
+# (uses the default CDN URL) or `--canary https://my-cdn.example.com/sdk-bundle/`.
 # Reference corpus artifacts stay external:
 #   - host `packages/reference-assets/dist/` separately when not relying on npm/unpkg
 #   - the pinned reference model file URLs are baked into the SDK, so warmup still
@@ -152,10 +152,11 @@ echo "📋 Contents:"
 ls -la "$OUTPUT_DIR"/packages/*/*.tgz 2>/dev/null || echo "   (No tgz files found)"
 echo ""
 echo "💡 Usage:"
+echo "   Canary: npx @iwsdk/create my-app --canary"
 echo "   Remote: Upload sdk-bundle/ to S3, then:"
-echo "           npx @iwsdk/create my-app --from https://my-cdn.example.com/sdk-bundle/"
+echo "           npx @iwsdk/create my-app --canary https://my-cdn.example.com/sdk-bundle/"
 echo "   Local:  npx serve ./sdk-bundle -l 3456"
-echo "           npx @iwsdk/create my-app --from http://localhost:3456"
+echo "           npx @iwsdk/create my-app --canary http://localhost:3456"
 echo ""
 echo "🧠 Reference note:"
 echo "   sdk-bundle/ excludes the reference corpus payload."

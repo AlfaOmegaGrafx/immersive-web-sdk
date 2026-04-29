@@ -301,13 +301,13 @@ importers:
     dependencies:
       '@iwer/devui':
         specifier: ^2.2.0
-        version: 2.2.0(iwer@2.2.0)
+        version: 2.2.0(iwer@2.2.1)
       '@iwer/sem':
         specifier: ^0.2.5
-        version: 0.2.5(iwer@2.2.0)
+        version: 0.2.5(iwer@2.2.1)
       iwer:
-        specifier: ^2.2.0
-        version: 2.2.0
+        specifier: ^2.2.1
+        version: 2.2.1
       playwright:
         specifier: ^1.58.2
         version: 1.58.2
@@ -3084,8 +3084,8 @@ packages:
     resolution: {integrity: sha512-HGYWWS/ehqTV3xN10i23tkPkpH46MLCIMFNCaaKNavAXTF1RkqxawEPtnjnGZ6XKSInBKkiOA5BKS+aZiY3AvA==}
     engines: {node: '>=8'}
 
-  iwer@2.2.0:
-    resolution: {integrity: sha512-AfhCP9JjdFNLIEFNY342PaHS8RUH44iCUGDskHM3CUKvDu1aPOCQCJ+IfIvvYqUeUooDvG5UyrTeXz0yzfZmGw==}
+  iwer@2.2.1:
+    resolution: {integrity: sha512-TBGgUlOpYsJpYmBCDRrW2KDHC70XZeFrlOwlDNiso+dp83wwRyCLaeN50/qo4JRIKyn08+cD6iaw5+t+D7U+uQ==}
 
   jackspeak@3.4.3:
     resolution: {integrity: sha512-OGlZQpz2yfahA/Rd1Y8Cd9SIEsqvXkLVoSw/cgwhnhFMDbsQFeZYoJJ7bIZBS9BcamUW96asq/npPWugM+RQBw==}
@@ -5217,14 +5217,14 @@ snapshots:
     dependencies:
       minipass: 7.1.2
 
-  '@iwer/devui@2.2.0(iwer@2.2.0)':
+  '@iwer/devui@2.2.0(iwer@2.2.1)':
     dependencies:
       '@fortawesome/fontawesome-svg-core': 6.6.0
       '@fortawesome/free-solid-svg-icons': 6.6.0
       '@fortawesome/react-fontawesome': 0.2.2(@fortawesome/fontawesome-svg-core@6.6.0)(react@19.2.0)
       '@pmndrs/handle': 6.6.28(react@19.2.0)
       '@pmndrs/pointer-events': 6.6.28
-      iwer: 2.2.0
+      iwer: 2.2.1
       react: 19.2.0
       react-dom: 19.2.0(react@19.2.0)
       styled-components: 6.1.19(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -5233,9 +5233,9 @@ snapshots:
       - '@types/react'
       - immer
 
-  '@iwer/sem@0.2.5(iwer@2.2.0)':
+  '@iwer/sem@0.2.5(iwer@2.2.1)':
     dependencies:
-      iwer: 2.2.0
+      iwer: 2.2.1
       three: super-three@0.181.0
       ts-proto: 2.8.3
 
@@ -7352,7 +7352,7 @@ snapshots:
       html-escaper: 2.0.2
       istanbul-lib-report: 3.0.1
 
-  iwer@2.2.0:
+  iwer@2.2.1:
     dependencies:
       gl-matrix: 3.4.4
       webxr-layers-polyfill: 1.1.0
