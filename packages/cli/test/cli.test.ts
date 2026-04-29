@@ -577,7 +577,7 @@ describe('runtime introspection and raw output', () => {
     expect(status.exitCode).toBe(0);
     const parsed = JSON.parse(status.stdout);
     expect(parsed.data.state.browserConnected).toBe(true);
-  expect(parsed.data.state.browserCommandReady).toBe(true);
+    expect(parsed.data.state.browserCommandReady).toBe(true);
     expect(parsed.data.state.session.browser.status).toBe('connected');
   });
 
@@ -807,7 +807,11 @@ describe('adapter management', () => {
       command: 'node',
       args: ['custom.js', '--workspace', '/tmp/elsewhere'],
     };
-    await writeFile(copilotPath, `${JSON.stringify(copilot, null, 2)}\n`, 'utf8');
+    await writeFile(
+      copilotPath,
+      `${JSON.stringify(copilot, null, 2)}\n`,
+      'utf8',
+    );
 
     const codex = await readFile(codexPath, 'utf8');
     await writeFile(
@@ -899,7 +903,7 @@ describe('adapter management', () => {
 });
 
 describe('dev lifecycle', () => {
-  test('requires dev:runtime, records observed launch state, and syncs canonical adapters', async () => {
+  test('requires dev:runtime and records observed launch state', async () => {
     const fixtureScript = path.join(appA, 'dev-runtime.mjs');
     const fallbackScript = path.join(appA, 'dev-should-not-run.mjs');
     const fallbackMarkerPath = path.join(appA, 'dev-script-hit.txt');
@@ -933,14 +937,6 @@ process.exit(1);
     expect(parsedUp.data.session.localUrl).toContain('http://localhost:');
     expect(parsedUp.data.session.browser.status).toBe('connected');
     expect(parsedUp.data.session.browser.commandReady).toBe(true);
-    const adapterStatuses = Object.fromEntries(
-      parsedUp.data.adapters.map((entry: { tool: string; status: string }) => [
-        entry.tool,
-        entry.status,
-      ]),
-    );
-    expect(adapterStatuses.claude).toBe('configured');
-    expect(adapterStatuses.cursor).toBe('configured');
     expect(existsSync(fallbackMarkerPath)).toBe(false);
 
     const launch = parsedUp.data.launch;
@@ -951,16 +947,6 @@ process.exit(1);
     expect(typeof parsedUp.data.logPath).toBe('string');
     expect(String(parsedUp.data.logPath)).toContain(
       path.join('.iwsdk', 'runtime', 'logs'),
-    );
-
-    const claude = JSON.parse(
-      await readFile(path.join(appA, '.mcp.json'), 'utf8'),
-    );
-    expect(claude.mcpServers['iwsdk-runtime'].args).toContain('mcp');
-    expect(claude.mcpServers['iwsdk-runtime'].args).toContain('stdio');
-    expect(claude.mcpServers['iwsdk-runtime'].args).not.toContain('--port');
-    expect(claude.mcpServers['iwsdk-runtime'].args).not.toContain(
-      '--workspace',
     );
 
     const down = await runCli(['dev', 'down'], appA);

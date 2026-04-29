@@ -94,12 +94,10 @@ describe('project-local runtime state', () => {
       port: 8081,
       localUrl: 'https://localhost:8081',
       aiMode: 'agent',
-      aiTools: ['claude', 'cursor'],
     });
 
     const session = await getRuntimeSession(appA);
     expect(session?.port).toBe(8081);
-    expect(session?.aiTools).toEqual(['claude', 'cursor']);
 
     const resolved = await resolveWorkspaceRoot({
       cwd: path.join(appA, 'src'),
@@ -156,7 +154,6 @@ describe('project-local runtime state', () => {
       port: 5173,
       localUrl: 'http://localhost:5173',
       aiMode: 'agent',
-      aiTools: ['claude'],
       browser: {
         status: 'launching',
         connected: false,
