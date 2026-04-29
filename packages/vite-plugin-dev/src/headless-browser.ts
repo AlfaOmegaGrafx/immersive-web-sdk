@@ -182,6 +182,74 @@ async function doChromiumInstall(): Promise<void> {
   });
 }
 
+/**
+ * Check whether a GPU device is available. On macOS/Windows this always
+ * returns true (Metal/D3D11 require a GPU by definition). On Linux it
+ * probes /dev/dri/ for render nodes, which works in Docker, VMs, and
+ * bare-metal environments without requiring external tools.
+ */
+function hasGpuDevice(): boolean {
+  if (os.platform() !== 'linux') {return true;}
+  try {
+    const entries = fs.readdirSync('/dev/dri');
+    return entries.some((e) => e.startsWith('renderD') || e.startsWith('card'));
+  } catch {
+    return false;
+  }
+}
+
+type GpuBackend = {
+  kind: 'hardware' | 'swiftshader';
+  useGl: string;
+  useAngle: string;
+  reason: 'env-override' | 'auto';
+};
+
+const VALID_GPU_VALUES = ['auto', 'gpu', 'swiftshader'];
+
+/**
+ * Resolve the GPU / ANGLE backend for Chromium.
+ *
+ * Override with IWSDK_GPU env var:
+ *   - "auto"        (default) auto-detect; hardware GL when a GPU is present,
+ *                    SwiftShader otherwise
+ *   - "gpu"         force hardware GL (fails if no GPU)
+ *   - "swiftshader" force CPU-based SwiftShader rendering
+ */
+function resolveGpuBackend(): GpuBackend {
+  const envOverride = process.env.IWSDK_GPU?.toLowerCase();
+
+  if (envOverride !== undefined && !VALID_GPU_VALUES.includes(envOverride)) {
+    console.warn(
+      `⚠️  IWSDK: Unknown IWSDK_GPU value "${process.env.IWSDK_GPU}". ` +
+        'Valid values: auto, gpu, swiftshader. Falling back to auto-detect.',
+    );
+  }
+
+  if (envOverride === 'swiftshader') {
+    return { kind: 'swiftshader', useGl: 'angle', useAngle: 'swiftshader', reason: 'env-override' };
+  }
+
+  const platform = os.platform();
+  if (platform === 'darwin') {
+    return { kind: 'hardware', useGl: 'angle', useAngle: 'metal', reason: 'auto' };
+  }
+  if (platform === 'win32') {
+    return { kind: 'hardware', useGl: 'angle', useAngle: 'd3d11', reason: 'auto' };
+  }
+
+  // Linux: honour explicit "gpu" override, otherwise auto-detect
+  if (envOverride === 'gpu') {
+    return { kind: 'hardware', useGl: 'angle', useAngle: 'gl', reason: 'env-override' };
+  }
+
+  if (hasGpuDevice()) {
+    return { kind: 'hardware', useGl: 'angle', useAngle: 'gl', reason: 'auto' };
+  }
+
+  return { kind: 'swiftshader', useGl: 'angle', useAngle: 'swiftshader', reason: 'auto' };
+}
+
 export async function launchManagedBrowser(
   url: string,
   headless: boolean,
@@ -195,21 +263,23 @@ export async function launchManagedBrowser(
 ): Promise<ManagedBrowser> {
   await ensureChromiumInstalled();
 
-  // Select GPU backend based on platform
-  const angleBackend =
-    os.platform() === 'darwin'
-      ? 'metal'
-      : os.platform() === 'win32'
-        ? 'd3d11'
-        : 'gl';
+  const backend = resolveGpuBackend();
+
+  console.log(
+    backend.kind === 'swiftshader'
+      ? backend.reason === 'env-override'
+        ? '🖥️  IWSDK: Using SwiftShader (software rendering) — IWSDK_GPU=swiftshader'
+        : '🖥️  IWSDK: Using SwiftShader (software rendering) — no GPU detected'
+      : `🖥️  IWSDK: Using hardware GPU (${backend.useAngle})`,
+  );
 
   const browser = await chromium.launch({
     headless,
     args: [
-      '--enable-webgl', // Ensure WebGL is available
-      '--use-gl=angle', // Use ANGLE for WebGL
-      `--use-angle=${angleBackend}`, // Platform-specific GPU backend
-      '--disable-background-timer-throttling', // No rAF throttling
+      '--enable-webgl',
+      `--use-gl=${backend.useGl}`,
+      `--use-angle=${backend.useAngle}`,
+      '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
     ],
   });
