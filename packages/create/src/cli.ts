@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import fs from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -392,10 +392,6 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
       const xrLiteral = `{ ${entries.join(', ')} }`;
       resolvedRecipe.edits['@xrFeaturesStr'] = xrLiteral;
 
-      // MCP tool selection for vite.config.ts
-      const mcpToolsLiteral = `[${res.aiTools.map((t) => `'${t}'`).join(', ')}]`;
-      resolvedRecipe.edits['@mcpToolsStr'] = mcpToolsLiteral;
-
       const outDir = join(process.cwd(), res.name);
 
       // Check if target directory already exists and is non-empty
@@ -517,6 +513,25 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
           await installDependenciesFromBundle(outDir, source);
         } else {
           await installDependencies(outDir);
+        }
+      }
+
+      // Write MCP adapter configs for the selected AI tools
+      if (res.installNow && res.aiTools.length > 0) {
+        try {
+          execFileSync(
+            process.execPath,
+            [
+              join(outDir, 'node_modules/@iwsdk/cli/dist/cli.js'),
+              'adapter',
+              'sync',
+              '--tools',
+              res.aiTools.join(','),
+            ],
+            { cwd: outDir, stdio: 'ignore', timeout: 15000 },
+          );
+        } catch {
+          // Non-fatal: adapter sync failure shouldn't block project creation
         }
       }
 

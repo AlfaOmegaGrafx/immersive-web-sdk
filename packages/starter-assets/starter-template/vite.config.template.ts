@@ -26,7 +26,7 @@ export default defineConfig({
         environment: 'living_room',
         /* @template:end */
       },
-      ai: { tools: ['claude', 'cursor', 'copilot', 'codex'] /* @chef:mcp */ },
+      ai: { mode: 'agent' },
       verbose: true,
     }),
     /* @template:if kind='metaspatial' */
@@ -45,9 +45,7 @@ export default defineConfig({
     /* @template:end */
     compileUIKit({ sourceDir: 'ui', outputDir: 'public/ui', verbose: true }),
   ],
-  server: {
-    host: '0.0.0.0',
-  },
+  server: { host: '0.0.0.0', port: 8081, open: true },
   build: {
     outDir: 'dist',
     sourcemap: process.env.NODE_ENV !== 'production',

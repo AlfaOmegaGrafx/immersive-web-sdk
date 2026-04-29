@@ -43,7 +43,6 @@ describe('runtime session writer', () => {
       localUrl: 'https://localhost:5174',
       networkUrls: ['https://192.168.1.2:5174'],
       aiMode: 'agent',
-      aiTools: ['claude'],
     });
 
     const sessionFile = path.join(workspaceRoot, IWSDK_RUNTIME_SESSION_PATH);
@@ -52,7 +51,6 @@ describe('runtime session writer', () => {
     expect(session.port).toBe(5174);
     expect(written.port).toBe(5174);
     expect(written.localUrl).toBe('https://localhost:5174');
-    expect(written.aiTools).toEqual(['claude']);
 
     await unregisterRuntimeSession(workspaceRoot);
     await expect(readFile(sessionFile, 'utf8')).rejects.toThrow();
@@ -66,7 +64,6 @@ describe('runtime session writer', () => {
       port: 5175,
       localUrl: 'https://localhost:5175',
       aiMode: 'agent',
-      aiTools: ['claude'],
       browser: {
         status: 'launching',
         connected: false,
@@ -102,7 +99,6 @@ describe('runtime session writer', () => {
       port: 5176,
       localUrl: 'https://localhost:5176',
       aiMode: 'agent',
-      aiTools: ['claude'],
       browser: {
         status: 'launching',
         connected: false,

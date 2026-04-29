@@ -49,7 +49,6 @@ export interface RegisterRuntimeSessionInput {
   localUrl: string;
   networkUrls?: string[];
   aiMode?: string;
-  aiTools?: RuntimeSession['aiTools'];
   browser?: RuntimeBrowserState;
 }
 
@@ -226,7 +225,6 @@ export async function registerRuntimeSession(
     localUrl: input.localUrl,
     networkUrls: input.networkUrls ?? [],
     aiMode: input.aiMode,
-    aiTools: input.aiTools ?? [],
     browser: input.browser ?? existing?.browser,
     registeredAt: existing?.registeredAt ?? now,
     updatedAt: now,

@@ -41,14 +41,6 @@ export interface AiOptions {
   mode?: AiMode;
 
   /**
-   * Which AI tools this workspace targets.
-   * The dev server publishes this in project-local runtime session metadata.
-   * The CLI uses the same tool set when it syncs canonical MCP adapter configs.
-   * @default ['claude']
-   */
-  tools?: AiTool[];
-
-  /**
    * Screenshot size constraint.
    * - In agent mode: sets the Playwright viewport dimensions directly.
    * - In oversight/collaborate: screenshots are downscaled to fit within
@@ -140,7 +132,6 @@ export interface ProcessedDevOptions {
   };
   ai?: {
     mode: AiMode;
-    tools: AiTool[];
     headless: boolean;
     devUI: boolean;
     viewport: { width: number; height: number } | null;

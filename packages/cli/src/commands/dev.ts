@@ -36,7 +36,7 @@ import {
   setLaunchMetadata,
 } from '../runtime-state.js';
 import { RuntimeCommandExecutionError, sendRuntimeCommand } from '../runtime-transport.js';
-import { syncStableAdaptersForWorkspace } from './adapter.js';
+import { readAdapterStatus } from './adapter.js';
 import { handleStatus } from './status.js';
 
 interface PackageJsonManifest {
@@ -443,10 +443,7 @@ export async function handleDevUp(
     if (openBrowser) {
       await openUrl(waitResult.session.localUrl);
     }
-    const adapters = await syncStableAdaptersForWorkspace(
-      workspaceRoot,
-      options,
-    );
+    const adapters = await readAdapterStatus(workspaceRoot);
     if (foreground) {
       io.stdout.write(
         `[IWSDK] Runtime already running at ${waitResult.session.localUrl}\n`,
@@ -561,7 +558,7 @@ export async function handleDevUp(
   }
 
   const launch = await getLaunchMetadata(workspaceRoot);
-  const adapters = await syncStableAdaptersForWorkspace(workspaceRoot, options);
+  const adapters = await readAdapterStatus(workspaceRoot);
 
   if (openBrowser) {
     await openUrl(waitResult.session.localUrl);

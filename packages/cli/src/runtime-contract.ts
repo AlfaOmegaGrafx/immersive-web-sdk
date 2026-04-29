@@ -101,7 +101,6 @@ export interface RuntimeSession {
   localUrl: string;
   networkUrls: string[];
   aiMode?: string;
-  aiTools: AiTool[];
   browser?: RuntimeBrowserState;
   registeredAt: string;
   updatedAt: string;

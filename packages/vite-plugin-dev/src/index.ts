@@ -103,7 +103,6 @@ function processOptions(options: DevPluginOptions = {}): ProcessedDevOptions {
 
     processed.ai = {
       mode,
-      tools: options.ai.tools ?? ['claude'],
       headless: settings.headless,
       devUI: settings.devUI,
       viewport: settings.fixedViewport ? screenshotSize : null,
@@ -943,7 +942,6 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
             localUrl: server.resolvedUrls?.local?.[0] ?? browserUrl,
             networkUrls: server.resolvedUrls?.network ?? [],
             aiMode: pluginOptions.ai?.mode,
-            aiTools: pluginOptions.ai?.tools ?? [],
             browser: currentBrowserState ?? undefined,
           });
         } catch (error) {

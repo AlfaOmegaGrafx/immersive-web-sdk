@@ -190,7 +190,7 @@ async function generateRecipeForStarter(starterDir, casRoot, casVersion) {
   const files = [];
 
   function transformTemplate(source, ctx) {
-    // Pass 1: feature anchors /* @chef:xr */, /* @chef:app */, /* @chef:mcp */
+    // Pass 1: feature anchors /* @chef:xr */, /* @chef:app */
     // Scan, track brace/bracket stacks and last closed object/array; collect edits, then apply back-to-front
     const edits = [];
     let i = 0;
@@ -263,21 +263,6 @@ async function generateRecipeForStarter(starterDir, casRoot, casVersion) {
             start: lastClosed.start,
             end: lastClosed.end + 1,
             replace: placeholder,
-          });
-          // also remove the comment itself
-          edits.push({ start: i, end: end + 2, replace: '' });
-          i = end + 2;
-          continue;
-        }
-        if (trimmed === '@chef:mcp') {
-          if (!lastClosedBracket) {
-            i = end + 2;
-            continue;
-          }
-          edits.push({
-            start: lastClosedBracket.start,
-            end: lastClosedBracket.end + 1,
-            replace: '{{ @mcpToolsStr }}',
           });
           // also remove the comment itself
           edits.push({ start: i, end: end + 2, replace: '' });
@@ -503,7 +488,6 @@ async function generateRecipeForStarter(starterDir, casRoot, casVersion) {
   const xrFeaturesObj = { handTracking: true };
   edits['@appFeaturesStr'] = toJsObjectLiteral(appFeaturesObj);
   edits['@xrFeaturesStr'] = toJsObjectLiteral(xrFeaturesObj);
-  edits['@mcpToolsStr'] = "['claude', 'cursor', 'copilot', 'codex']";
   edits['@appName'] = title;
 
   const recipe = { name: id, version: casVersion, edits };

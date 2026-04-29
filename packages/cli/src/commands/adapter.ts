@@ -31,7 +31,7 @@ import {
   SUPPORTED_AI_TOOLS,
   type AiTool,
 } from '../runtime-contract.js';
-import { getRuntimeSession, resolveWorkspaceRoot } from '../runtime-state.js';
+import { resolveWorkspaceRoot } from '../runtime-state.js';
 
 export interface AdapterStatusEntry {
   tool: AiTool;
@@ -162,10 +162,7 @@ export async function readAdapterStatus(
   return status;
 }
 
-async function resolveAdapterTools(
-  options: CliOptions,
-  workspaceRoot: string,
-): Promise<AiTool[]> {
+function resolveAdapterTools(options: CliOptions): AiTool[] {
   if (typeof options.tools === 'string') {
     const requested = options.tools
       .split(',')
@@ -180,21 +177,7 @@ async function resolveAdapterTools(
     return requested.filter((tool): tool is AiTool => isAiTool(tool));
   }
 
-  const session = await getRuntimeSession(workspaceRoot);
-  if (session && Array.isArray(session.aiTools)) {
-    return session.aiTools.filter((tool): tool is AiTool => isAiTool(tool));
-  }
-
   return [...SUPPORTED_AI_TOOLS];
-}
-
-export async function syncStableAdaptersForWorkspace(
-  workspaceRoot: string,
-  options: CliOptions,
-): Promise<AdapterStatusEntry[]> {
-  const tools = await resolveAdapterTools(options, workspaceRoot);
-  await syncMcpAdapters({ workspaceRoot, tools });
-  return readAdapterStatus(workspaceRoot);
 }
 
 async function resolveWorkspace(
@@ -213,7 +196,7 @@ export async function handleAdapterSync(
   io: ResolvedCliIo,
 ): Promise<CliSuccess<unknown>> {
   const workspaceRoot = await resolveWorkspace(io, options.workspace);
-  const tools = await resolveAdapterTools(options, workspaceRoot);
+  const tools = resolveAdapterTools(options);
   const result = await syncMcpAdapters({ workspaceRoot, tools });
   return createSuccess({
     ...result,
@@ -226,7 +209,7 @@ export async function handleAdapterPrune(
   io: ResolvedCliIo,
 ): Promise<CliSuccess<unknown>> {
   const workspaceRoot = await resolveWorkspace(io, options.workspace);
-  const tools = await resolveAdapterTools(options, workspaceRoot);
+  const tools = resolveAdapterTools(options);
   await pruneMcpAdapters({ workspaceRoot, tools });
   return createSuccess({
     workspaceRoot,
