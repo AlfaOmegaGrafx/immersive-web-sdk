@@ -326,7 +326,6 @@ export class DepthSensingSystem extends createSystem(
     this.gpuDepthData = [];
     this.preprocessingPass?.dispose();
     this.preprocessingPass = undefined;
-    this.minMaxEntityCount = 0;
   }
 
   private updateEnabledFeatures(xrSession: XRSession | null): void {
@@ -365,21 +364,28 @@ export class DepthSensingSystem extends createSystem(
    * Renders a fullscreen pass per eye that computes min/max/avg depth in a 4×4
    * neighborhood, outputting to per-view 2D render targets.
    */
+  private get isGPUDepth(): boolean {
+    const session = this.xrManager.getSession();
+    return session?.depthUsage === 'gpu-optimized';
+  }
+
+  private getDepthTextureArray(): Texture | undefined {
+    return this.isGPUDepth
+      ? this.depthTextures?.getNativeTexture()
+      : this.depthTextures?.getDataArrayTexture();
+  }
+
   private runMinMaxPreprocessing(): void {
     if (this.minMaxEntityCount === 0) {
       return;
     }
 
-    const nativeTexture = this.depthTextures?.getNativeTexture();
-    const dataArrayTexture = this.depthTextures?.getDataArrayTexture();
-    const isGPUDepth = nativeTexture !== undefined;
-    const depthTextureArray = isGPUDepth
-      ? (nativeTexture as Texture)
-      : (dataArrayTexture as Texture);
+    const depthTextureArray = this.getDepthTextureArray();
     if (!depthTextureArray) {
       return;
     }
 
+    const isGPUDepth = this.isGPUDepth;
     const depthNear =
       (this.gpuDepthData[0] as unknown as { depthNear: number } | undefined)
         ?.depthNear ?? 0;
@@ -481,18 +487,15 @@ export class DepthSensingSystem extends createSystem(
    * VIEW_ID to select the correct stereo layer.
    */
   private updateOcclusionUniforms(): void {
-    const nativeTexture = this.depthTextures?.getNativeTexture();
-    const dataArrayTexture = this.depthTextures?.getDataArrayTexture();
-    const isGPUDepth = nativeTexture !== undefined;
-    const depthNear =
-      (this.gpuDepthData[0] as unknown as { depthNear: number } | undefined)
-        ?.depthNear ?? 0;
-
-    // Select the texture array: ExternalTexture for GPU, DataArrayTexture for CPU
-    const depthTextureArray = isGPUDepth ? nativeTexture : dataArrayTexture;
+    const depthTextureArray = this.getDepthTextureArray();
     if (!depthTextureArray) {
       return;
     }
+
+    const isGPUDepth = this.isGPUDepth;
+    const depthNear =
+      (this.gpuDepthData[0] as unknown as { depthNear: number } | undefined)
+        ?.depthNear ?? 0;
 
     this.renderer.getDrawingBufferSize(this.viewportSize);
 
