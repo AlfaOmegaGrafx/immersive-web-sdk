@@ -1,13 +1,51 @@
 #!/bin/bash
 # Stop hook for IWSDK development
-# On first stop: nudges the agent to verify testing, formatting, linting, and log MCP feedback.
-# On second stop (after agent responds): lets it through.
+# - Per-turn detection: only inspects tool uses since the last real user message.
+# - Code-relevant filter: ignores edits to docs, shell scripts, .claude/ configs, etc.
+# - On first stop with relevant edits: nudge the agent through the checklist.
+# - On second stop (after agent responds): let it through.
 
 INPUT=$(cat)
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 
 # If we already intervened once, let it stop
 if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
+  exit 0
+fi
+
+# Default: silent unless we positively detect a code-relevant edit in this turn
+SHOULD_FIRE=false
+
+if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  # Per-turn boundary: line number of the last real user message.
+  # Tool results are also "type":"user" but always carry a "toolUseResult" field;
+  # real user prompts do not. Single-pass awk.
+  LAST_USER_LINE=$(awk '/"type":"user"/ && !/"toolUseResult"/{n=NR} END{print n+0}' "$TRANSCRIPT_PATH")
+
+  if [ "$LAST_USER_LINE" -gt 0 ]; then
+    EDITED_FILES=$(tail -n +"$LAST_USER_LINE" "$TRANSCRIPT_PATH" \
+      | jq -r 'select(.type == "assistant")
+               | (.message.content // [])[]?
+               | select(.type == "tool_use"
+                        and (.name == "Edit" or .name == "Write"
+                             or .name == "MultiEdit" or .name == "NotebookEdit"))
+               | .input.file_path // .input.notebook_path // empty' 2>/dev/null)
+
+    # Drop .claude/ paths, then keep only code-relevant extensions
+    RELEVANT=$(printf '%s\n' "$EDITED_FILES" \
+      | grep -v '^$' \
+      | grep -v '/\.claude/' \
+      | grep -E '\.(ts|tsx|js|jsx|mjs|cjs|css|scss|sass|html|htm|json)$' \
+      || true)
+
+    if [ -n "$RELEVANT" ]; then
+      SHOULD_FIRE=true
+    fi
+  fi
+fi
+
+if [ "$SHOULD_FIRE" != "true" ]; then
   exit 0
 fi
 
