@@ -348,6 +348,54 @@ function setupInputManagement(world: World): XRInputManager {
   world.player = inputManager.xrOrigin;
   world.input = inputManager;
 
+  const xrOrigin = inputManager.xrOrigin;
+
+  const playerEntity = world.createTransformEntity(xrOrigin, {
+    parent: world.sceneEntity,
+    persistent: true,
+  });
+
+  const headEntity = world.createTransformEntity(xrOrigin.head, {
+    parent: playerEntity,
+    persistent: true,
+  });
+
+  const rayLeftEntity = world.createTransformEntity(xrOrigin.raySpaces.left, {
+    parent: playerEntity,
+    persistent: true,
+  });
+  const rayRightEntity = world.createTransformEntity(
+    xrOrigin.raySpaces.right,
+    { parent: playerEntity, persistent: true },
+  );
+
+  const gripLeftEntity = world.createTransformEntity(
+    xrOrigin.gripSpaces.left,
+    { parent: playerEntity, persistent: true },
+  );
+  const gripRightEntity = world.createTransformEntity(
+    xrOrigin.gripSpaces.right,
+    { parent: playerEntity, persistent: true },
+  );
+
+  const indexTipLeftEntity = world.createTransformEntity(
+    xrOrigin.indexTipSpaces.left,
+    { parent: playerEntity, persistent: true },
+  );
+  const indexTipRightEntity = world.createTransformEntity(
+    xrOrigin.indexTipSpaces.right,
+    { parent: playerEntity, persistent: true },
+  );
+
+  world.playerEntity = playerEntity;
+  world.playerHeadEntity = headEntity;
+  world.playerSpaceEntities = {
+    head: headEntity,
+    raySpaces: { left: rayLeftEntity, right: rayRightEntity },
+    gripSpaces: { left: gripLeftEntity, right: gripRightEntity },
+    indexTipSpaces: { left: indexTipLeftEntity, right: indexTipRightEntity },
+  };
+
   return inputManager;
 }
 

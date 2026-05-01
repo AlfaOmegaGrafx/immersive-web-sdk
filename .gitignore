@@ -104,5 +104,8 @@ examples/**/metaspatial/components/
 # Local playground (created via `node packages/create/dist/cli.js playground`)
 /playground/
 
+# IWSDK dev tool runtime state
+.iwsdk/
+
 # Local-only notes and artifacts (kept on disk, never committed)
 /.local/

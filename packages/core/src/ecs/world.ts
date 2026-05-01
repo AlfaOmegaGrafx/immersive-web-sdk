@@ -85,6 +85,18 @@ export class World extends ElicsWorld {
   /** MCP runtime for framework-specific tools. Set automatically during World.create(). */
   public mcpRuntime?: MCPRuntime;
 
+  /** Entity wrapping the XROrigin Group (persistent, survives level changes). */
+  public playerEntity!: Entity;
+  /** Entity wrapping the player head Group (persistent). */
+  public playerHeadEntity!: Entity;
+  /** Entities for all XR input space Groups under the player rig (all persistent). */
+  public playerSpaceEntities!: {
+    head: Entity;
+    raySpaces: { left: Entity; right: Entity };
+    gripSpaces: { left: Entity; right: Entity };
+    indexTipSpaces: { left: Entity; right: Entity };
+  };
+
   constructor() {
     super();
     const originalReleaseFunc = this.entityManager.releaseEntityInstance.bind(

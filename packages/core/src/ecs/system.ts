@@ -55,6 +55,8 @@ export interface System<S extends SystemSchema, Q extends SystemQueries>
   xrFrame: XRFrame;
 
   readonly player: XROrigin;
+  readonly playerEntity: Entity;
+  readonly playerHeadEntity: Entity;
   readonly input: XRInputManager;
   readonly scene: Scene;
   readonly camera: PerspectiveCamera;
@@ -99,6 +101,8 @@ export function createSystem<S extends SystemSchema, Q extends SystemQueries>(
     public config = {} as SystemConfigSignals<S>;
 
     public readonly player: XROrigin;
+    public readonly playerEntity: Entity;
+    public readonly playerHeadEntity: Entity;
     public readonly input: XRInputManager;
     public readonly scene: Scene;
     public readonly camera: PerspectiveCamera;
@@ -115,6 +119,8 @@ export function createSystem<S extends SystemSchema, Q extends SystemQueries>(
         this.config[key] = signal(schema[key].default as any);
       }
       this.player = world.player;
+      this.playerEntity = world.playerEntity;
+      this.playerHeadEntity = world.playerHeadEntity;
       this.input = world.input;
       this.scene = world.scene;
       this.camera = world.camera;
