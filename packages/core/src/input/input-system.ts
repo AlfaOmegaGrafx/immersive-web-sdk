@@ -6,7 +6,7 @@
  */
 
 import type { PointerEvent, PointerEventsMap } from '@pmndrs/pointer-events';
-import { createSystem, Entity, VisibilityState } from '../ecs/index.js';
+import { createSystem, Entity, Types, VisibilityState } from '../ecs/index.js';
 import { DistanceGrabbable } from '../grab/distance-grabbable.js';
 import { OneHandGrabbable } from '../grab/one-hand-grabbable.js';
 import { TwoHandsGrabbable } from '../grab/two-hands-grabbable.js';
@@ -55,7 +55,10 @@ export class InputSystem extends createSystem(
     /** Distance grabbable entities */
     distanceGrabbables: { required: [DistanceGrabbable, Transform] },
   },
-  {},
+  {
+    /** Keep pointer target lists available outside immersive XR for browser canvas input. */
+    maintainScenePointers: { type: Types.Boolean, default: false },
+  },
 ) {
   /** Descendants for ray pointer intersection */
   private rayDescendants: Object3D[] = [];
@@ -65,7 +68,6 @@ export class InputSystem extends createSystem(
   private grabDescendants: Object3D[] = [];
 
   private shouldSetIntersectables = false;
-  private dirty = true;
   private listeners = new WeakMap<
     Object3D,
     {
@@ -78,69 +80,46 @@ export class InputSystem extends createSystem(
   private lastBVHUpdate = new WeakMap<Object3D, number>();
 
   init(): void {
+    this.shouldSetIntersectables =
+      this.visibilityState.value === VisibilityState.Visible ||
+      this.config.maintainScenePointers.value;
     // React to XR visibility for enabling scoped intersections
     this.cleanupFuncs.push(
       this.visibilityState.subscribe((value) => {
-        const nextVisible = value === VisibilityState.Visible;
-        if (this.shouldSetIntersectables !== nextVisible) {
-          this.shouldSetIntersectables = nextVisible;
-          this.dirty = true;
-        }
+        this.shouldSetIntersectables =
+          value === VisibilityState.Visible ||
+          this.config.maintainScenePointers.value;
       }),
     );
 
-    // Handle additions/removals for ray interactables
+    // Wire pointer event listeners on qualify; tear them down on disqualify.
+    // Descendant arrays are rebuilt every frame, so no dirty bookkeeping here.
     this.queries.rayInteractables.subscribe('qualify', (entity) => {
       this.setupEventListeners(entity);
-      this.dirty = true;
     });
     this.queries.rayInteractables.subscribe('disqualify', (entity) => {
       this.cleanupEventListeners(entity);
-      this.dirty = true;
     });
 
-    // Handle additions/removals for poke interactables
     this.queries.pokeInteractables.subscribe('qualify', (entity) => {
       this.setupEventListeners(entity);
-      this.dirty = true;
       // Enable touch pointers when first poke interactable appears
-      this.input.multiPointers.left.toggleSubPointer('touch', true);
-      this.input.multiPointers.right.toggleSubPointer('touch', true);
+      this.input.xr.multiPointers.left.toggleSubPointer('touch', true);
+      this.input.xr.multiPointers.right.toggleSubPointer('touch', true);
     });
     this.queries.pokeInteractables.subscribe('disqualify', (entity) => {
       this.cleanupEventListeners(entity);
-      this.dirty = true;
       // Disable touch pointers when no poke interactables remain
       if (this.queries.pokeInteractables.entities.size === 0) {
-        this.input.multiPointers.left.toggleSubPointer('touch', false);
-        this.input.multiPointers.right.toggleSubPointer('touch', false);
+        this.input.xr.multiPointers.left.toggleSubPointer('touch', false);
+        this.input.xr.multiPointers.right.toggleSubPointer('touch', false);
       }
-    });
-
-    // Handle additions/removals for grabbables (all types)
-    this.queries.oneHandGrabbables.subscribe('qualify', () => {
-      this.dirty = true;
-    });
-    this.queries.oneHandGrabbables.subscribe('disqualify', () => {
-      this.dirty = true;
-    });
-    this.queries.twoHandsGrabbables.subscribe('qualify', () => {
-      this.dirty = true;
-    });
-    this.queries.twoHandsGrabbables.subscribe('disqualify', () => {
-      this.dirty = true;
-    });
-    this.queries.distanceGrabbables.subscribe('qualify', () => {
-      this.dirty = true;
-    });
-    this.queries.distanceGrabbables.subscribe('disqualify', () => {
-      this.dirty = true;
     });
 
     // Enable touch pointer if there are already poke interactables
     if (this.queries.pokeInteractables.entities.size > 0) {
-      this.input.multiPointers.left.toggleSubPointer('touch', true);
-      this.input.multiPointers.right.toggleSubPointer('touch', true);
+      this.input.xr.multiPointers.left.toggleSubPointer('touch', true);
+      this.input.xr.multiPointers.right.toggleSubPointer('touch', true);
     }
   }
 
@@ -148,11 +127,10 @@ export class InputSystem extends createSystem(
     // Update input sampling first
     this.input.update(this.xrManager, delta, time);
 
-    // Maintain the filtered lists of interactables for pointer raycasting
-    if (this.dirty) {
-      this.dirty = false;
-      this.updateDescendantArrays();
-    }
+    // Rebuild interactable descendant arrays every frame so newly parented
+    // entities (TransformSystem runs at priority 0, after this system at -4)
+    // become hit-testable on the same frame they're created.
+    this.updateDescendantArrays();
   }
 
   /**
@@ -176,42 +154,36 @@ export class InputSystem extends createSystem(
     // Collect ray interactables + distance grabbables (both use ray)
     for (const entity of this.queries.rayInteractables.entities) {
       const obj = entity.object3D;
-      if (isDescendantOf(obj, this.scene)) {
-        this.rayDescendants.push(obj!);
+      if (obj) {
+        this.rayDescendants.push(obj);
       }
     }
     for (const entity of this.queries.distanceGrabbables.entities) {
       const obj = entity.object3D;
-      if (isDescendantOf(obj, this.scene)) {
-        // Only add if not already in ray descendants
-        if (!this.rayDescendants.includes(obj!)) {
-          this.rayDescendants.push(obj!);
-        }
+      if (obj && !this.rayDescendants.includes(obj)) {
+        this.rayDescendants.push(obj);
       }
     }
 
     // Collect poke/touch interactables
     for (const entity of this.queries.pokeInteractables.entities) {
       const obj = entity.object3D;
-      if (isDescendantOf(obj, this.scene)) {
-        this.touchDescendants.push(obj!);
+      if (obj) {
+        this.touchDescendants.push(obj);
       }
     }
 
     // Collect grab interactables (oneHand + twoHands)
     for (const entity of this.queries.oneHandGrabbables.entities) {
       const obj = entity.object3D;
-      if (isDescendantOf(obj, this.scene)) {
-        this.grabDescendants.push(obj!);
+      if (obj) {
+        this.grabDescendants.push(obj);
       }
     }
     for (const entity of this.queries.twoHandsGrabbables.entities) {
       const obj = entity.object3D;
-      if (isDescendantOf(obj, this.scene)) {
-        // Only add if not already in grab descendants
-        if (!this.grabDescendants.includes(obj!)) {
-          this.grabDescendants.push(obj!);
-        }
+      if (obj && !this.grabDescendants.includes(obj)) {
+        this.grabDescendants.push(obj);
       }
     }
 
@@ -324,17 +296,4 @@ export class InputSystem extends createSystem(
     }
     entity.removeComponent(Hovered).removeComponent(Pressed);
   }
-}
-
-function isDescendantOf(
-  object: Object3D | null | undefined,
-  parent: Object3D,
-): boolean {
-  while (object) {
-    if (object === parent) {
-      return true;
-    }
-    object = object.parent as any;
-  }
-  return false;
 }

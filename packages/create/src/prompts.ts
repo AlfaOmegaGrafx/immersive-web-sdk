@@ -16,7 +16,10 @@ import {
   AiTool,
 } from './types.js';
 
-export async function promptFlow(nameArg?: string): Promise<PromptResult> {
+export async function promptFlow(
+  nameArg?: string,
+  defaults: { xrEnabled?: boolean } = {},
+): Promise<PromptResult> {
   let cancelled = false;
   const onCancel = () => {
     cancelled = true;
@@ -72,29 +75,17 @@ export async function promptFlow(nameArg?: string): Promise<PromptResult> {
     ? []
     : (aiTools as AiTool[]) || [];
 
-  const { language, mode } = await prompts(
-    [
-      {
-        type: 'select',
-        name: 'language',
-        message: 'Which language do you want to use?',
-        choices: [
-          { title: 'TypeScript', value: 'ts' },
-          { title: 'JavaScript', value: 'js' },
-        ],
-        initial: 0,
-      },
-      {
-        type: 'select',
-        name: 'mode',
-        message: 'What type of experience are you building?',
-        choices: [
-          { title: 'Virtual Reality', value: 'vr' },
-          { title: 'Augmented Reality', value: 'ar' },
-        ],
-        initial: 0,
-      },
-    ],
+  const { language } = await prompts(
+    {
+      type: 'select',
+      name: 'language',
+      message: 'Which language do you want to use?',
+      choices: [
+        { title: 'TypeScript', value: 'ts' },
+        { title: 'JavaScript', value: 'js' },
+      ],
+      initial: 0,
+    },
     { onCancel },
   );
 
@@ -102,8 +93,49 @@ export async function promptFlow(nameArg?: string): Promise<PromptResult> {
     throw new Error('Input cancelled');
   }
 
-  const xrFeatureKeys =
-    mode === 'vr'
+  const xrEnabled =
+    defaults.xrEnabled ??
+    !!(
+      await prompts(
+        {
+          type: 'toggle',
+          name: 'xrEnabled',
+          message: 'Enable XR support?',
+          initial: true,
+          active: 'Yes',
+          inactive: 'No',
+        },
+        { onCancel },
+      )
+    ).xrEnabled;
+
+  if (cancelled) {
+    throw new Error('Input cancelled');
+  }
+
+  const { mode = 'vr' } = xrEnabled
+    ? await prompts(
+        {
+          type: 'select',
+          name: 'mode',
+          message: 'What type of XR experience are you building?',
+          choices: [
+            { title: 'Virtual Reality', value: 'vr' },
+            { title: 'Augmented Reality', value: 'ar' },
+          ],
+          initial: 0,
+        },
+        { onCancel },
+      )
+    : { mode: 'vr' as const };
+
+  if (cancelled) {
+    throw new Error('Input cancelled');
+  }
+
+  const xrFeatureKeys = !xrEnabled
+    ? ([] as const)
+    : mode === 'vr'
       ? (['handTracking', 'layers'] as const)
       : ([
           'handTracking',
@@ -161,7 +193,7 @@ export async function promptFlow(nameArg?: string): Promise<PromptResult> {
   let sceneUnderstandingEnabled = false;
   let environmentRaycastEnabled = false;
 
-  if (mode === 'vr') {
+  if (xrEnabled && mode === 'vr') {
     // Locomotion (VR only)
     const ans = await prompts(
       {
@@ -199,7 +231,7 @@ export async function promptFlow(nameArg?: string): Promise<PromptResult> {
       }
       locomotionUseWorker = !!followUp.useWorker;
     }
-  } else {
+  } else if (xrEnabled) {
     // AR: Scene Understanding first (requires room scanning)
     const sceneAns = await prompts(
       {
@@ -237,20 +269,23 @@ export async function promptFlow(nameArg?: string): Promise<PromptResult> {
     environmentRaycastEnabled = !!raycastAns.environmentRaycastEnabled;
   }
 
-  // Grabbing (default: enabled)
-  const { grabbingEnabled } = await prompts(
-    {
-      type: 'toggle',
-      name: 'grabbingEnabled',
-      message: 'Enable grabbing (one/two-hand, distance)?',
-      initial: true,
-      active: 'Yes',
-      inactive: 'No',
-    },
-    { onCancel },
-  );
-  if (cancelled) {
-    throw new Error('Input cancelled');
+  let grabbingEnabled = false;
+  if (xrEnabled) {
+    const grabbingAnswer = await prompts(
+      {
+        type: 'toggle',
+        name: 'grabbingEnabled',
+        message: 'Enable grabbing (one/two-hand, distance)?',
+        initial: true,
+        active: 'Yes',
+        inactive: 'No',
+      },
+      { onCancel },
+    );
+    if (cancelled) {
+      throw new Error('Input cancelled');
+    }
+    grabbingEnabled = !!grabbingAnswer.grabbingEnabled;
   }
 
   // Physics (default: disabled)
@@ -342,6 +377,7 @@ export async function promptFlow(nameArg?: string): Promise<PromptResult> {
     id,
     installNow,
     metaspatial,
+    xrEnabled,
     mode,
     language,
     features: [],

@@ -177,6 +177,23 @@ pos[2] += deltaZ; // Move forward
 
 ## Parenting and Hierarchies
 
+### Player Origin and Main Camera
+
+`World.create()` creates a persistent `world.player` origin and parents `world.camera` under it. This is true for normal browser rendering and XR. The relationship lets browser-first apps keep an XR-compatible scene graph from day one.
+
+```ts
+const world = await World.create(container, {
+  xr: false,
+  render: {
+    camera: { position: [0, 1.7, 4], lookAt: [0, 1, 0] },
+  },
+});
+
+console.log(world.camera.parent === world.player); // true
+```
+
+For first-person movement, move `world.player`. For orbit, editor, product, cinematic, or third-person cameras, keep `world.player` at the origin and move/rotate `world.camera` locally. If a system needs the actual viewer location, use `world.camera.getWorldPosition(tempVector)` instead of assuming `world.camera.position` is world-space.
+
 ### Scene vs Level Roots
 
 IWSDK provides two root contexts:

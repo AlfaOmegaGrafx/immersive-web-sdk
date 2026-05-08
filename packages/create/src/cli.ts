@@ -44,6 +44,7 @@ type CliOptions = {
   canary?: string | boolean;
   mode?: 'vr' | 'ar';
   language?: 'ts' | 'js';
+  xr?: boolean;
   metaspatial?: boolean;
   install?: boolean;
   git?: boolean;
@@ -99,10 +100,15 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
     .description('Official CLI for creating Immersive Web SDK projects')
     .version(version)
     .argument('[name]', 'Project name')
-    .option('--canary [url]', 'Use canary SDK bundle (optionally from a custom URL)')
+    .option(
+      '--canary [url]',
+      'Use canary SDK bundle (optionally from a custom URL)',
+    )
     .option('-y, --yes', 'Use defaults and skip prompts')
     .option('--mode <mode>', 'Experience mode: vr or ar', 'vr')
     .option('--language <lang>', 'Language: ts or js', 'ts')
+    .option('--xr', 'Enable XR support', true)
+    .option('--no-xr', 'Disable XR support for a browser-only 3D project')
     .option('--metaspatial', 'Use Meta Spatial Editor workflow', false)
     .option('--no-metaspatial', 'Use manual workflow (default)')
     .option('--install', 'Install dependencies after scaffolding', true)
@@ -215,6 +221,7 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
     if (cliOpts.yes) {
       const mode = (cliOpts.mode || 'vr') as 'vr' | 'ar';
       const language = (cliOpts.language || 'ts') as 'ts' | 'js';
+      const xrEnabled = cliOpts.xr ?? true;
       const metaspatial = cliOpts.metaspatial ?? false;
 
       // Meta Spatial Editor is only available as a GUI app on macOS/Windows.
@@ -241,7 +248,7 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
           );
 
       const locomotionEnabled =
-        mode === 'vr' ? (cliOpts.locomotion ?? true) : false;
+        xrEnabled && mode === 'vr' ? (cliOpts.locomotion ?? true) : false;
 
       // MSE detection for scripted mode (no auto-install — requires TOS consent)
       let mseInstallResult: MSEInstallResult | undefined;
@@ -275,23 +282,29 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
         id: variantId,
         installNow: cliOpts.install ?? true,
         metaspatial,
+        xrEnabled,
         mode,
         language,
         features: [],
         featureFlags: {
           locomotionEnabled,
           locomotionUseWorker: locomotionEnabled ? true : undefined,
-          grabbingEnabled: cliOpts.grabbing ?? true,
+          grabbingEnabled: xrEnabled ? (cliOpts.grabbing ?? true) : false,
           physicsEnabled: cliOpts.physics ?? false,
           sceneUnderstandingEnabled:
-            mode === 'ar' ? (cliOpts.sceneUnderstanding ?? true) : false,
+            xrEnabled && mode === 'ar'
+              ? (cliOpts.sceneUnderstanding ?? true)
+              : false,
           environmentRaycastEnabled:
-            mode === 'ar' ? (cliOpts.environmentRaycast ?? true) : false,
+            xrEnabled && mode === 'ar'
+              ? (cliOpts.environmentRaycast ?? true)
+              : false,
         },
         gitInit: cliOpts.git ?? true,
         aiTools,
-        xrFeatureStates:
-          mode === 'ar'
+        xrFeatureStates: !xrEnabled
+          ? {}
+          : mode === 'ar'
             ? {
                 handTracking: 'optional',
                 anchors: 'optional',
@@ -304,7 +317,12 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
         mseInstallResult,
       };
     } else {
-      res = await promptFlow(nameArg);
+      const xrFlagProvided =
+        process.argv.includes('--xr') || process.argv.includes('--no-xr');
+      res = await promptFlow(
+        nameArg,
+        xrFlagProvided ? { xrEnabled: cliOpts.xr ?? true } : {},
+      );
     }
 
     // Validate project name (both interactive and non-interactive paths)
@@ -360,9 +378,9 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
       resolvedRecipe.edits['@appName'] = res.name;
       // World features (stringified JS object-literal expected by recipes)
       const ff = res.featureFlags || {
-        locomotionEnabled: res.mode === 'vr',
+        locomotionEnabled: res.xrEnabled && res.mode === 'vr',
         locomotionUseWorker: true,
-        grabbingEnabled: true,
+        grabbingEnabled: res.xrEnabled,
         physicsEnabled: false,
         sceneUnderstandingEnabled: false,
         environmentRaycastEnabled: false,
@@ -373,9 +391,13 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
           : 'true'
         : 'false';
       const sceneUnderstandingLiteral =
-        res.mode === 'ar' && ff.sceneUnderstandingEnabled ? 'true' : 'false';
+        res.xrEnabled && res.mode === 'ar' && ff.sceneUnderstandingEnabled
+          ? 'true'
+          : 'false';
       const environmentRaycastLiteral =
-        res.mode === 'ar' && ff.environmentRaycastEnabled ? 'true' : 'false';
+        res.xrEnabled && res.mode === 'ar' && ff.environmentRaycastEnabled
+          ? 'true'
+          : 'false';
       resolvedRecipe.edits['@appFeaturesStr'] =
         `{ locomotion: ${locomotionLiteral}, grabbing: ${ff.grabbingEnabled ? 'true' : 'false'}, physics: ${ff.physicsEnabled ? 'true' : 'false'}, sceneUnderstanding: ${sceneUnderstandingLiteral}, environmentRaycast: ${environmentRaycastLiteral} }`;
       // XR features (tri-state -> JS object literal)
@@ -391,6 +413,9 @@ IWSDK Create CLI v${VERSION}\nNode ${process.version}`;
       }
       const xrLiteral = `{ ${entries.join(', ')} }`;
       resolvedRecipe.edits['@xrFeaturesStr'] = xrLiteral;
+      resolvedRecipe.edits['@xrConfigStr'] = res.xrEnabled
+        ? `{ sessionMode: SessionMode.Immersive${res.mode === 'ar' ? 'AR' : 'VR'}, offer: 'always', features: ${xrLiteral} }`
+        : 'false';
 
       const outDir = join(process.cwd(), res.name);
 

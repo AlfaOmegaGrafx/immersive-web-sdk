@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { XRInputManager, XROrigin } from '@iwsdk/xr-input';
+import { XROrigin } from '@iwsdk/xr-input';
 import { Signal, signal } from '@preact/signals-core';
 import {
   System as ElicsSystem,
@@ -23,6 +23,7 @@ import {
   WebGLRenderer,
   WebXRManager,
 } from '../runtime/index.js';
+import type { InputManager } from '../input/index.js';
 import { Entity } from './entity.js';
 import type { VisibilityState, World } from './world';
 
@@ -57,7 +58,7 @@ export interface System<S extends SystemSchema, Q extends SystemQueries>
   readonly player: XROrigin;
   readonly playerEntity: Entity;
   readonly playerHeadEntity: Entity;
-  readonly input: XRInputManager;
+  readonly input: InputManager;
   readonly scene: Scene;
   readonly camera: PerspectiveCamera;
   readonly renderer: WebGLRenderer;
@@ -103,7 +104,7 @@ export function createSystem<S extends SystemSchema, Q extends SystemQueries>(
     public readonly player: XROrigin;
     public readonly playerEntity: Entity;
     public readonly playerHeadEntity: Entity;
-    public readonly input: XRInputManager;
+    public readonly input: InputManager;
     public readonly scene: Scene;
     public readonly camera: PerspectiveCamera;
     public readonly renderer: WebGLRenderer;

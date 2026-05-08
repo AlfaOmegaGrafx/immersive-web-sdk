@@ -74,8 +74,8 @@ World.create(document.getElementById('scene-container') as HTMLDivElement, {
     sessionMode: /* @session-mode */ SessionMode.ImmersiveAR,
     offer: 'always',
     // Optional structured features; layers/local-floor are offered by default
-    features: {} /* @chef:xr */,
-  },
+    features: {},
+  } /* @chef:xr-config */,
   features: {} /* @chef:app */,
   /* @template:if kind='metaspatial' */ level:
     './glxf/Composition.glxf' /* @template:end */,

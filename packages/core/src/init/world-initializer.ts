@@ -24,9 +24,12 @@ import {
 } from '../environment-raycast/index.js';
 import { GrabSystem } from '../grab/index.js';
 import {
+  CanvasPointerEventsOption,
+  CanvasPointerSystem,
   RayInteractable,
   PokeInteractable,
   Hovered,
+  InputManager,
   Pressed,
 } from '../input/index.js';
 import { InputSystem } from '../input/index.js';
@@ -78,6 +81,7 @@ import {
   resolveReferenceSpaceType,
   buildSessionInit,
 } from './index.js';
+import { attachCameraToPlayer } from './player-camera.js';
 
 /** Options for {@link initializeWorld} / {@link World.create}.
  *
@@ -92,8 +96,8 @@ export type WorldOptions = {
   /** Level to load after initialization. Accepts a GLXF URL string or an object with a `url` field. */
   level?: { url?: string } | string;
 
-  /** XR session options and offer behavior. */
-  xr?: XROptions & { offer?: 'none' | 'once' | 'always' };
+  /** XR session options and offer behavior. Set to `false` for browser-only worlds. */
+  xr?: false | (XROptions & { offer?: 'none' | 'once' | 'always' });
 
   /** Renderer & camera configuration. */
   render?: {
@@ -107,6 +111,22 @@ export type WorldOptions = {
     defaultLighting?: boolean;
     /** Enable stencil buffer. @defaultValue false */
     stencil?: boolean;
+    /** Initial local camera pose under `world.player`. */
+    camera?: {
+      position?: [number, number, number];
+      rotation?: [number, number, number];
+      quaternion?: [number, number, number, number];
+      lookAt?: [number, number, number];
+    };
+  };
+
+  /** Browser input and pointer interaction configuration. */
+  input?: {
+    /**
+     * Forward DOM pointer events from the renderer canvas into the Three scene.
+     * @defaultValue true
+     */
+    canvasPointerEvents?: CanvasPointerEventsOption;
   };
 
   /** Opt‑in feature systems. */
@@ -136,12 +156,17 @@ export type WorldOptions = {
     spatialUI?:
       | boolean
       | {
+          /** @deprecated Use `input.canvasPointerEvents` instead. */
           forwardHtmlEvents?: boolean;
           kits?: Array<Record<string, unknown>> | Record<string, unknown>;
           preferredColorScheme?: ColorScheme;
         };
   };
 };
+
+type CameraPoseOptions = NonNullable<
+  NonNullable<WorldOptions['render']>['camera']
+>;
 
 /**
  * Initialize a new WebXR world with all required systems and setup
@@ -176,7 +201,7 @@ export function initializeWorld(
   assignRenderingToWorld(world, camera, renderer, scene);
 
   // Setup input management
-  setupInputManagement(world);
+  setupInputManagement(world, config.input);
 
   // Store XR defaults for later explicit launch/offer calls
   world.xrDefaults = {
@@ -248,18 +273,32 @@ function createWorldInstance(): World {
  * Extract and normalize configuration options
  */
 function extractConfiguration(options: WorldOptions) {
+  const xrOptions = options.xr === false ? undefined : options.xr;
+  const spatialUI = options.features?.spatialUI;
+  const legacyForwardHtmlEvents =
+    typeof spatialUI === 'object' && spatialUI
+      ? spatialUI.forwardHtmlEvents
+      : undefined;
+  const canvasPointerEvents =
+    options.input?.canvasPointerEvents ?? legacyForwardHtmlEvents;
+
   return {
     cameraFov: options.render?.fov ?? 50,
     cameraNear: options.render?.near ?? 0.1,
     cameraFar: options.render?.far ?? 200,
+    cameraPose: options.render?.camera,
     defaultLighting: options.render?.defaultLighting ?? true,
     stencil: options.render?.stencil ?? false,
     xr: {
-      sessionMode: options.xr?.sessionMode ?? SessionMode.ImmersiveVR,
+      enabled: options.xr !== false,
+      sessionMode: xrOptions?.sessionMode ?? SessionMode.ImmersiveVR,
       referenceSpace:
-        options.xr?.referenceSpace ?? ReferenceSpaceType.LocalFloor,
-      features: options.xr?.features,
-      offer: options.xr?.offer ?? 'always',
+        xrOptions?.referenceSpace ?? ReferenceSpaceType.LocalFloor,
+      features: xrOptions?.features,
+      offer: options.xr === false ? 'none' : (xrOptions?.offer ?? 'always'),
+    },
+    input: {
+      canvasPointerEvents,
     },
     features: {
       locomotion: options.features?.locomotion ?? false,
@@ -285,11 +324,15 @@ function setupRendering(sceneContainer: HTMLDivElement, config: any) {
     config.cameraFar,
   );
   camera.position.set(0, 1.7, 0);
+  if (config.cameraPose) {
+    applyCameraPose(camera, config.cameraPose);
+  }
 
   // Renderer Setup
   const renderer = new WebGLRenderer({
     antialias: true,
-    alpha: config.xr.sessionMode === SessionMode.ImmersiveAR,
+    alpha:
+      config.xr.enabled && config.xr.sessionMode === SessionMode.ImmersiveAR,
     // @ts-ignore
     multiviewStereo: true,
     stencil: config.stencil,
@@ -297,13 +340,31 @@ function setupRendering(sceneContainer: HTMLDivElement, config: any) {
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = SRGBColorSpace;
-  renderer.xr.enabled = true;
+  renderer.xr.enabled = config.xr.enabled;
   sceneContainer.appendChild(renderer.domElement);
 
   // Scene Setup
   const scene = new Scene();
 
   return { camera, renderer, scene };
+}
+
+function applyCameraPose(
+  camera: PerspectiveCamera,
+  pose: CameraPoseOptions,
+): void {
+  if (pose.position) {
+    camera.position.fromArray(pose.position);
+  }
+  if (pose.rotation) {
+    camera.rotation.fromArray(pose.rotation);
+  }
+  if (pose.quaternion) {
+    camera.quaternion.fromArray(pose.quaternion);
+  }
+  if (pose.lookAt) {
+    camera.lookAt(...pose.lookAt);
+  }
 }
 
 /**
@@ -337,21 +398,30 @@ function assignRenderingToWorld(
 /**
  * Setup XR input management
  */
-function setupInputManagement(world: World): XRInputManager {
-  const inputManager = new XRInputManager({
+function setupInputManagement(
+  world: World,
+  config: ReturnType<typeof extractConfiguration>['input'],
+): XRInputManager {
+  const xrInputManager = new XRInputManager({
     camera: world.camera,
     scene: world.scene,
     assetLoader: AssetManager,
   });
-  world.scene.add(inputManager.xrOrigin);
-  inputManager.xrOrigin.add(world.camera);
-  world.player = inputManager.xrOrigin;
-  world.input = inputManager;
+  world.scene.add(xrInputManager.xrOrigin);
+  attachCameraToPlayer(xrInputManager.xrOrigin, world.camera);
+  world.player = xrInputManager.xrOrigin;
+  world.input = new InputManager(xrInputManager, {
+    canvasPointerEvents: config.canvasPointerEvents,
+  });
 
-  const xrOrigin = inputManager.xrOrigin;
+  const xrOrigin = xrInputManager.xrOrigin;
 
   const playerEntity = world.createTransformEntity(xrOrigin, {
     parent: world.sceneEntity,
+    persistent: true,
+  });
+  world.cameraEntity = world.createTransformEntity(world.camera, {
+    parent: playerEntity,
     persistent: true,
   });
 
@@ -364,15 +434,15 @@ function setupInputManagement(world: World): XRInputManager {
     parent: playerEntity,
     persistent: true,
   });
-  const rayRightEntity = world.createTransformEntity(
-    xrOrigin.raySpaces.right,
-    { parent: playerEntity, persistent: true },
-  );
+  const rayRightEntity = world.createTransformEntity(xrOrigin.raySpaces.right, {
+    parent: playerEntity,
+    persistent: true,
+  });
 
-  const gripLeftEntity = world.createTransformEntity(
-    xrOrigin.gripSpaces.left,
-    { parent: playerEntity, persistent: true },
-  );
+  const gripLeftEntity = world.createTransformEntity(xrOrigin.gripSpaces.left, {
+    parent: playerEntity,
+    persistent: true,
+  });
   const gripRightEntity = world.createTransformEntity(
     xrOrigin.gripSpaces.right,
     { parent: playerEntity, persistent: true },
@@ -396,7 +466,7 @@ function setupInputManagement(world: World): XRInputManager {
     indexTipSpaces: { left: indexTipLeftEntity, right: indexTipRightEntity },
   };
 
-  return inputManager;
+  return xrInputManager;
 }
 
 /**
@@ -558,7 +628,18 @@ function registerFeatureSystems(
       configData: locOpts,
     });
   }
-  world.registerSystem(InputSystem, { priority: -4 });
+  world.registerSystem(InputSystem, {
+    priority: -4,
+    configData: {
+      maintainScenePointers: world.input.canvasPointerEvents.enabled,
+    },
+  });
+  if (world.input.canvasPointerEvents.enabled) {
+    world.registerSystem(CanvasPointerSystem, {
+      priority: -3.5,
+      configData: world.input.canvasPointerEvents,
+    });
+  }
   if (grabbingEnabled) {
     const grabOpts =
       typeof grabbing === 'object' && grabbing
@@ -615,7 +696,7 @@ function registerFeatureSystems(
   }
 
   // WebXR composition layers (quad/cylinder)
-  if (config.xr.features?.layers) {
+  if (config.xr.enabled && config.xr.features?.layers) {
     world
       .registerComponent(XRQuadLayer)
       .registerComponent(XRCylinderLayer)
@@ -625,10 +706,6 @@ function registerFeatureSystems(
 
   // Spatial UI systems (Panel, ScreenSpace, Follow)
   if (spatialUIEnabled) {
-    const forwardHtmlEvents =
-      typeof spatialUI === 'object' && spatialUI
-        ? spatialUI.forwardHtmlEvents
-        : undefined;
     const kitsVal =
       typeof spatialUI === 'object' && spatialUI ? spatialUI.kits : undefined;
     const kitsObj = Array.isArray(kitsVal)
@@ -645,7 +722,6 @@ function registerFeatureSystems(
       .registerComponent(Follower)
       .registerSystem(PanelUISystem, {
         configData: {
-          ...(forwardHtmlEvents !== undefined ? { forwardHtmlEvents } : {}),
           ...(kitsObj ? { kits: kitsObj } : {}),
           ...(preferredColorScheme !== undefined
             ? { preferredColorScheme }

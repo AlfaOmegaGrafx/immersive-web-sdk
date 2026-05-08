@@ -139,7 +139,7 @@ export class EnvironmentRaycastSystem extends createSystem({
     }
 
     for (const [entity, handedness] of this.pendingControllerSources) {
-      const inputSource = this.input.getPrimaryInputSource(handedness);
+      const inputSource = this.input.xr.getPrimaryInputSource(handedness);
       if (inputSource) {
         this.pendingControllerSources.delete(entity);
         entity.setValue(EnvironmentRaycastTarget, '_sourceRequested', false);
@@ -274,7 +274,7 @@ export class EnvironmentRaycastSystem extends createSystem({
 
       case RaycastSpace.Left:
       case RaycastSpace.Right: {
-        const inputSource = this.input.getPrimaryInputSource(space);
+        const inputSource = this.input.xr.getPrimaryInputSource(space);
         if (inputSource) {
           return inputSource.targetRaySpace;
         }

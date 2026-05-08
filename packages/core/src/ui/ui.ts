@@ -5,7 +5,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { forwardHtmlEvents } from '@pmndrs/pointer-events';
 import {
   reversePainterSortStable,
   Component,
@@ -56,7 +55,7 @@ export interface PanelUIProps {
  * - Compile `.uikitml` → JSON using the UIKitML Vite plugin, then set {@link PanelUIProps.config}.
  * - When parented to world space (default), {@link PanelUISystem} drives target dimensions from
  *   {@link PanelUIProps.maxWidth} / {@link PanelUIProps.maxHeight} and accounts for world scale.
- * - Pointer events are forwarded to the UI when `forwardHtmlEvents` is enabled.
+ * - Pointer events are forwarded by the input layer when canvas pointer events are enabled.
  * @category UI
  * @see /getting-started/06-spatial-ui
  */
@@ -87,11 +86,11 @@ export const PanelDocument = createComponent(
 );
 
 /**
- * Renders and updates spatial UI panels and forwards pointer events.
+ * Renders and updates spatial UI panels.
  *
  * @remarks
  * - Sets Three.js transparent sort to a stable painter order for UI readability.
- * - When configured to forward HTML events, bridges DOM events into the 3D scene.
+ * - DOM pointer forwarding is owned by `CanvasPointerSystem` in the input layer.
  * - Continuously updates document target dimensions in world space.
  * @category UI
  */
@@ -101,37 +100,18 @@ export class PanelUISystem extends createSystem(
     configuredPanels: { required: [PanelUI, PanelDocument] },
   },
   {
-    /** When true, forwards HTML/DOM pointer events to the 3D UI. */
-    forwardHtmlEvents: { type: Types.Boolean, default: true },
     /** Additional pre-built UI component libraries */
     kits: { type: Types.Object, default: {} },
     /** Color scheme preference for UI theming */
     preferredColorScheme: { type: Types.String, default: 'system' },
   },
 ) {
-  private htmlHandler?: {
-    destroy: () => void;
-    update: () => void;
-  };
-
   private vec3 = new Vector3();
 
-  /** Configure transparent sort, set up DOM event forwarding, and reactive queries. */
+  /** Configure transparent sort, color scheme, and reactive queries. */
   init(): void {
     this.renderer.setTransparentSort(reversePainterSortStable);
     this.renderer.localClippingEnabled = true;
-    this.config.forwardHtmlEvents.subscribe((forwarding) => {
-      this.htmlHandler?.destroy();
-      if (forwarding) {
-        this.htmlHandler = forwardHtmlEvents(
-          this.renderer.domElement,
-          () => this.camera,
-          this.scene,
-        );
-      } else {
-        this.htmlHandler = undefined;
-      }
-    });
 
     // Apply color scheme preference
     this.config.preferredColorScheme.subscribe((scheme) => {
@@ -158,10 +138,8 @@ export class PanelUISystem extends createSystem(
     });
   }
 
-  /** Forward HTML events and tick loaded UIKit documents each frame. */
+  /** Tick loaded UIKit documents each frame. */
   update(_delta: number): void {
-    this.htmlHandler?.update();
-
     // Update loaded panels - need to call update on root component for animations/frame updates
     this.queries.configuredPanels.entities.forEach((entity) => {
       const document = PanelDocument.data.document[entity.index] as
@@ -257,10 +235,5 @@ export class PanelUISystem extends createSystem(
         document.dispose();
       }
     }
-  }
-
-  /** Tear down forwarded event handling. */
-  destroy(): void {
-    this.htmlHandler?.destroy();
   }
 }

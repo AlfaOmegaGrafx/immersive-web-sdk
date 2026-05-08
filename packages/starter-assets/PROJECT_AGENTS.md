@@ -66,6 +66,17 @@ mse-agent is the Meta Spatial Editor command-line tool for creating and modifyin
 
 ## Critical Best Practices
 
+### Browser 3D With First-Class XR
+
+IWSDK is a 3D web framework with first-class XR support. XR can be disabled for a browser-only app with `World.create(container, { xr: false })`, but the runtime still creates `world.player` as the local player/XR origin and keeps `world.camera` under it.
+
+- For first-person browser apps that may later enter XR, move `world.player` for locomotion or WASD-style movement. Treat `world.camera` as the viewer/head under that rig.
+- For orbit, editor, product, cinematic, or third-person views, it is fine to keep `world.player` at the origin and drive `world.camera` however the app needs.
+- `world.camera.position` is local to `world.player`. Use `world.camera.getWorldPosition(tempVector)` when logic needs the actual viewer position.
+- Configure the initial browser view with `render.camera` in `World.create`; do not add camera category presets unless the app explicitly needs one.
+
+Browser pointer input is enabled through `input.canvasPointerEvents` by default. Add `Interactable`/`RayInteractable` and react to `Hovered`/`Pressed` for objects that should work with both mouse/touch canvas input and XR rays. XR-specific input lives at `world.input.xr`; use `world.input.keyboard` and `world.input.browserGamepads` for browser controls.
+
 ### Feature Configuration (CRITICAL!)
 
 **This is the #1 cause of bugs in IWSDK projects.**
@@ -544,8 +555,8 @@ export class MySystem extends createSystem(
 
 ```typescript
 update() {
-  const leftGamepad = this.input.gamepads.left;
-  const rightGamepad = this.input.gamepads.right;
+  const leftGamepad = this.input.xr.gamepads.left;
+  const rightGamepad = this.input.xr.gamepads.right;
 
   // Button states
   leftGamepad?.getButtonPressed(InputComponent.Trigger);  // Currently held

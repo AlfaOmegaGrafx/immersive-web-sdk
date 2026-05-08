@@ -4,7 +4,9 @@ title: XR Origin & Spaces
 
 # XR Origin & Spaces
 
-`XROrigin` is the transform root for input. It contains Groups for the user’s head, ray spaces, and grip spaces. `XRInputManager` updates these from the XR frame each tick.
+`XROrigin` is the persistent local player origin. IWSDK creates it for every world, including browser-only worlds created with `xr: false`, and keeps `world.camera` parented under it. In XR, `XRInputManager` updates the head, ray, and grip spaces from the XR frame each tick. Outside XR, the origin is still useful as the coordinate space you can later hand to XR without rebuilding your scene graph.
+
+For first-person browser movement, move `world.player` and leave `world.camera` as the viewer under that rig. For orbit, editor, product, cinematic, or third-person views, it is fine to keep `world.player` at the origin and drive `world.camera` locally. `world.camera.position` is local to `world.player`; call `world.camera.getWorldPosition(...)` when you need the viewer's world-space position.
 
 ## Spaces
 
@@ -33,12 +35,12 @@ Attach your own tools to the spaces to keep them aligned in XR.
 ```ts
 // A laser sight attached to the right ray
 const sight = new Mesh(new CylinderGeometry(0.001, 0.001, 0.2), mat);
-xrInput.xrOrigin.raySpaces.right.add(sight);
+world.input.xr.xrOrigin.raySpaces.right.add(sight);
 
 // A held gadget anchored to the left grip
 const gadget = new Object3D();
 gadget.position.set(0, -0.02, 0.05);
-xrInput.xrOrigin.gripSpaces.left.add(gadget);
+world.input.xr.xrOrigin.gripSpaces.left.add(gadget);
 ```
 
 Head‑locked UI:
@@ -46,7 +48,7 @@ Head‑locked UI:
 ```ts
 const hud = createReticleOrHUD();
 hud.position.set(0, 0, -0.6);
-xrInput.xrOrigin.head.add(hud);
+world.input.xr.xrOrigin.head.add(hud);
 ```
 
 ## Coordinate spaces and conversions
@@ -56,7 +58,7 @@ xrInput.xrOrigin.head.add(hud);
 
 ```ts
 const pLocal = cursorWorld.clone();
-xrInput.xrOrigin.worldToLocal(pLocal);
+world.input.xr.xrOrigin.worldToLocal(pLocal);
 ```
 
 ## Tips

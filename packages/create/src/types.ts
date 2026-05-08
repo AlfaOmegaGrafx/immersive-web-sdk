@@ -41,6 +41,7 @@ export type PromptResult = {
   id: VariantId;
   installNow: boolean;
   metaspatial: boolean;
+  xrEnabled: boolean;
   mode: 'vr' | 'ar';
   language: 'ts' | 'js';
   // Legacy multiselect (kept for forward-compat with older recipes; unused now)

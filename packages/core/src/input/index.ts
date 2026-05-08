@@ -6,4 +6,8 @@
  */
 
 export * from './input-system.js';
+export * from './input-manager.js';
+export * from './canvas-pointer-system.js';
+export * from './stateful-keyboard.js';
+export * from './stateful-browser-gamepad.js';
 export * from './state-tags.js';

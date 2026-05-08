@@ -454,8 +454,7 @@ export function ecsFindEntities(
   }
 
   const maxResults = Math.max(1, Math.min(50, limit));
-  const results: EntitySummary[] = [];
-  let totalMatches = 0;
+  const matches: EntitySummary[] = [];
 
   // indexLookup is internal to ELICS (not part of the public API). If an
   // iteration API becomes public, migrate to that instead. For now, direct
@@ -502,25 +501,34 @@ export function ecsFindEntities(
       }
     }
 
-    totalMatches++;
-
-    if (results.length < maxResults) {
-      const componentIds = entity
-        .getComponents()
-        .map((c: AnyComponent) => c.id);
-      results.push({
-        entityIndex: entity.index,
-        name: entity.object3D?.name || undefined,
-        componentIds,
-      });
-    }
+    const componentIds = entity.getComponents().map((c: AnyComponent) => c.id);
+    matches.push({
+      entityIndex: entity.index,
+      name: entity.object3D?.name || undefined,
+      componentIds,
+    });
   }
+
+  const totalMatches = matches.length;
+  const results = matches
+    .sort((a, b) => getEntityDebugSortRank(a) - getEntityDebugSortRank(b))
+    .slice(0, maxResults);
 
   return {
     entities: results,
     total: totalMatches,
     limited: totalMatches > maxResults,
   };
+}
+
+function getEntityDebugSortRank(entity: EntitySummary): number {
+  // Keep infrastructure roots discoverable but list mutable level content first.
+  // Tools and agents often pick the first match for quick probes; LevelRoot is
+  // intentionally reset to identity every frame by LevelSystem.
+  if (entity.componentIds.includes('LevelRoot')) {
+    return 1;
+  }
+  return 0;
 }
 
 // ---------------------------------------------------------------------------

@@ -291,6 +291,7 @@ export function launchXR(world: World, options?: Partial<XROptions>) {
   };
 
   if (!world.session) {
+    world.renderer.xr.enabled = true;
     navigator.xr
       ?.requestSession?.(sessionMode, sessionOptions)
       .then(onSessionStart);

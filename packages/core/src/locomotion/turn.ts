@@ -83,7 +83,7 @@ export class TurnSystem extends createSystem(
   }
 
   private updateSmooth(delta: number): void {
-    const state = this.input.gamepads.right?.getAxesState(
+    const state = this.input.xr.gamepads.right?.getAxesState(
       InputComponent.Thumbstick,
     );
     const turningSpeedRadian = (this.config.turningSpeed.value / 180) * Math.PI;
@@ -97,9 +97,9 @@ export class TurnSystem extends createSystem(
   private updateSnap(delta: number): void {
     let turningLeft = false;
     let turningRight = false;
-    const gamepad = this.input.gamepads.right;
+    const gamepad = this.input.xr.gamepads.right;
     const turningAngleRadian = (this.config.turningAngle.value / 180) * Math.PI;
-    if (this.input.isPrimary('hand', 'right')) {
+    if (this.input.xr.isPrimary('hand', 'right')) {
       // Show and listen only if micro-gesture controls are enabled
       const enabled = this.config.microGestureControlsEnabled.value;
       this.turnSignals.visible = !!enabled;

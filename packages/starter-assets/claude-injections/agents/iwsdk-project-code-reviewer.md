@@ -232,7 +232,7 @@ Check for proper gamepad/input access.
 ```typescript
 // ✅ GOOD - Safe input access with optional chaining
 update() {
-  const leftGamepad = this.input.gamepads.left;
+  const leftGamepad = this.input.xr.gamepads.left;
   const triggerPressed = leftGamepad?.getButtonDown(InputComponent.Trigger) ?? false;
 }
 ```

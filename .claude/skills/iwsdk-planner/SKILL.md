@@ -15,6 +15,10 @@ IWSDK is built on three pillars:
 2. **Reactive Signals** via `@preact/signals-core`
 3. **Three.js Integration** with zero-copy transform binding (super-three v0.181.0)
 
+IWSDK is a 3D web framework with first-class XR support. `World.create()` always creates a persistent `world.player` origin and keeps `world.camera` under it, even when `xr: false` is used for browser-only apps. For first-person browser movement, move `world.player`; for orbit, editor, product, cinematic, or third-person cameras, it is fine to keep `world.player` at the origin and drive `world.camera`. Remember that `world.camera.position` is local to `world.player`, so use `camera.getWorldPosition(...)` when world-space viewer position matters.
+
+Use `input.canvasPointerEvents` for browser mouse/touch canvas events. Browser canvas pointers and XR rays both feed Three/Object3D pointer events and ECS `Hovered`/`Pressed` tags on `Interactable`/`RayInteractable` entities. XR-specific input is available at `world.input.xr`; keyboard and standard browser gamepads live at `world.input.keyboard` and `world.input.browserGamepads`.
+
 ## Critical Best Practices
 
 ### 1. Keep Systems Stateless
@@ -254,8 +258,8 @@ interface System {
 
 ```typescript
 update() {
-  const leftGamepad = this.input.gamepads.left;
-  const rightGamepad = this.input.gamepads.right;
+  const leftGamepad = this.input.xr.gamepads.left;
+  const rightGamepad = this.input.xr.gamepads.right;
 
   // Button states
   leftGamepad?.getButtonPressed(InputComponent.Trigger); // Currently pressed
@@ -1324,7 +1328,7 @@ export class MyInteractionSystem extends createSystem({
 }
 ```
 
-**StatefulGamepad API** (accessed via `this.input.gamepads.left` / `.right`):
+**StatefulGamepad API** (accessed via `this.input.xr.gamepads.left` / `.right`):
 
 - `getButtonDown(InputComponent.Trigger)` — true on the frame the button was pressed
 - `getButtonUp(InputComponent.Trigger)` — true on the frame the button was released

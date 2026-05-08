@@ -4,7 +4,23 @@ outline: [2, 4]
 
 # Chapter 3: Working in 3D
 
-Now that you can test your WebXR experience, it's time to learn how to create and manipulate 3D objects. In this chapter, you'll learn the fundamentals of 3D graphics using Three.js within the IWSDK framework. By the end, you'll be able to create primitive shapes and arrange them in 3D space.
+Now that you can test your IWSDK experience, it's time to learn how to create and manipulate 3D objects. In this chapter, you'll learn the fundamentals of 3D graphics using Three.js within the IWSDK framework. By the end, you'll be able to create primitive shapes and arrange them in 3D space.
+
+IWSDK apps can start as browser 3D apps and add XR later. Pass `xr: false` to create a browser-only world, or omit it/use an `xr` object when you want XR session support. Either way, IWSDK creates `world.player` as a persistent local player/XR origin and keeps `world.camera` as the main render camera under that origin.
+
+```ts
+const world = await World.create(container, {
+  xr: false,
+  render: {
+    camera: {
+      position: [0, 1.7, 4],
+      lookAt: [0, 1, 0],
+    },
+  },
+});
+```
+
+For first-person browser controls, move `world.player` so the same coordinate model can enter XR later. For orbit, editor, product, cinematic, and third-person cameras, keep `world.player` at the origin and drive `world.camera` however your app needs. `world.camera.position` is local to `world.player`, so use `world.camera.getWorldPosition(...)` when you need the viewer's world-space position.
 
 ## Three.js Fundamentals
 

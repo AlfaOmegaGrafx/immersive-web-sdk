@@ -4,18 +4,18 @@ outline: [2, 4]
 
 # Chapter 6: Built-in Interactions
 
-Now that your scene looks professional with environment and lighting, it's time to make it interactive! This chapter shows you how to enable grabbing and locomotion - the two most common interactions in VR.
+Now that your scene looks professional with environment and lighting, it's time to make it interactive. This chapter starts with the shared pointer path that works in browser 3D, then shows how to enable grabbing and locomotion for XR.
 
 ## How Input Works in IWSDK
 
-IWSDK provides a comprehensive input system that handles controllers, hands, and various interaction patterns automatically. The input stack includes:
+IWSDK provides a comprehensive input system that handles browser canvas pointers, keyboard, standard browser gamepads, XR controllers, hands, and various interaction patterns. The input stack includes:
 
-- **Visual representation** - Controllers and hands appear automatically
-- **Pointer events** - Cross-modal interactions that work with controllers and hand tracking
-- **Gamepad state** - Access to buttons, triggers, and thumbsticks
-- **Built-in systems** - Grab and locomotion work out of the box
+- **Browser pointer events** - Mouse/touch events from the renderer canvas when `input.canvasPointerEvents` is enabled
+- **XR pointer events** - Ray, grab, and poke interactions from controllers and hands
+- **Keyboard and gamepad state** - `world.input.keyboard`, `world.input.browserGamepads`, and `world.input.xr.gamepads`
+- **Built-in systems** - XR grab and locomotion work out of the box
 
-**Interaction Patterns**: Different interactions use different input approaches. **Grabbing** is built using pointer events - this makes it universal, working seamlessly with both controllers and hand tracking. **Locomotion** uses gamepad input because movement requires more advanced and precise controls like analog thumbsticks for smooth navigation.
+**Interaction Patterns**: Browser canvas clicks and XR rays both flow through pointer events and can set ECS `Hovered` / `Pressed` tags on interactable entities. **Grabbing** is an XR spatial interaction built on pointer events. **Locomotion** uses XR gamepad input because movement requires controls like analog thumbsticks for smooth navigation.
 
 ::: tip Learn More About Input
 For a deep dive into IWSDK's input architecture, see [XR Input Concepts](/concepts/xr-input/index.md).
@@ -24,6 +24,26 @@ For a deep dive into IWSDK's input architecture, see [XR Input Concepts](/concep
 ## Enabling Built-in Systems
 
 Grab and locomotion are **built-in systems** that you enable via the `features` flag in `World.create()`. No additional setup required - just enable them and start adding components to objects.
+
+## Browser Pointer Interaction
+
+Canvas pointer forwarding is enabled by default. Add `Interactable` or `RayInteractable` to an entity and react to `Hovered` or `Pressed` in a system to support both browser clicks and XR rays through the same ECS path.
+
+```javascript
+World.create(document.getElementById('scene-container'), {
+  xr: false,
+  input: { canvasPointerEvents: true },
+}).then((world) => {
+  const cube = new Mesh(
+    new BoxGeometry(0.4, 0.4, 0.4),
+    new MeshStandardMaterial({ color: 0x3355ff }),
+  );
+
+  world.createTransformEntity(cube).addComponent(Interactable);
+});
+```
+
+Use browser pointer interaction for selection, hover, and pressed states. Use XR grab and poke components when you need 6DoF spatial manipulation.
 
 ## Enabling Grab and Locomotion
 

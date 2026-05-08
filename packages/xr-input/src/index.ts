@@ -6,6 +6,7 @@
  */
 
 // Core input system exports
+export * from './gamepad/stateful-button-axes-device.js';
 export * from './gamepad/stateful-gamepad.js';
 export * from './gamepad/input-profiles.js';
 export * from './visual/adapter/base-visual-adapter.js';

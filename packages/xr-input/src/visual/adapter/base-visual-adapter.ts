@@ -84,6 +84,7 @@ export abstract class XRInputVisualAdapter {
         this.scene,
         this.camera,
         this.assetLoader,
+        this.inputConfig.assetPath,
       ).then((visual) => {
         if (
           visual &&
@@ -152,9 +153,11 @@ export abstract class XRInputVisualAdapter {
     scene: Scene,
     camera: PerspectiveCamera,
     assetLoader: XRAssetLoader,
+    profileAssetPath?: string,
   ): Promise<T> {
     const profileId = visualClass.assetProfileId ?? inputSource.profiles[0];
     const assetPath =
+      profileAssetPath ??
       visualClass.assetPath ??
       `${DEFAULT_PROFILES_PATH}/${profileId}/${inputSource.handedness}.glb`;
     const assetKeyPrefix = visualClass.assetKeyPrefix;
@@ -163,9 +166,14 @@ export abstract class XRInputVisualAdapter {
     if (this.visualCache.has(assetKey)) {
       visual = this.visualCache.get(assetKey) as T;
     } else {
-      const gltf = await assetLoader.loadGLTF(assetPath);
+      const gltf = await assetLoader.loadGLTF(assetPath).catch(() => ({
+        scene: new Group(),
+      }));
       visual = new visualClass(scene, camera, gltf.scene, layout);
       visual.init();
+      if (visual.model.children.length === 0) {
+        visual.model.visible = false;
+      }
       this.visualCache.set(assetKey, visual);
     }
     visual.connect(inputSource, enabled);

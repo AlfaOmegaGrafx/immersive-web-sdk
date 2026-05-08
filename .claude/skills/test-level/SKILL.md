@@ -197,7 +197,7 @@ All tagged entities should have the same `id` value (`"level:default"` for the i
 MCPCALL --tool ecs_find_entities --args '{"withComponents":["Transform"],"withoutComponents":["LevelTag"]}' 2>/dev/null
 ```
 
-Assert: Only entity 0 (scene root — created with persistent: true internally).
+Assert: 10 entities — entity 0 (scene root) plus 9 persistent input-rig entities created by the world bootstrap (xrOrigin, head, ray/grip/indexTip spaces for left and right). None of these should carry `LevelTag`.
 
 ---
 

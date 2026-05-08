@@ -114,16 +114,18 @@ export class SlideSystem extends createSystem(
     // Handle jump input
     if (
       this.config.enableJumping.value &&
-      this.input.gamepads.right?.getButtonDown(
+      this.input.xr.gamepads.right?.getButtonDown(
         this.config.jumpButton.value as InputComponent,
       )
     ) {
       this.locomotor.jump();
     }
 
-    if (this.input.isPrimary('controller', 'left')) {
+    if (this.input.xr.isPrimary('controller', 'left')) {
       this.input2D.copy(
-        this.input.gamepads.left?.getAxesValues(InputComponent.Thumbstick) || {
+        this.input.xr.gamepads.left?.getAxesValues(
+          InputComponent.Thumbstick,
+        ) || {
           x: 0,
           y: 0,
         },

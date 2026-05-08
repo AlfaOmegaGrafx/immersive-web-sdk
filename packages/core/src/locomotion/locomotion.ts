@@ -261,8 +261,8 @@ export class LocomotionSystem extends createSystem(
     this.player.position.copy(this.locomotor.position);
 
     // Toggle micro-gesture controls in hand-tracking mode
-    if (this.input.isPrimary('hand', 'right')) {
-      const gp = this.input.gamepads.right;
+    if (this.input.xr.isPrimary('hand', 'right')) {
+      const gp = this.input.xr.gamepads.right;
       if (gp) {
         // Swipe up (7) enables; swipe down (8) disables
         if (gp.getButtonDownByIdx(7)) {

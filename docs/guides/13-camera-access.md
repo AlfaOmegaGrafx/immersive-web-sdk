@@ -278,7 +278,7 @@ class ViewfinderSystem extends createSystem({}) {
 ```javascript
 class PhotoCaptureSystem extends createSystem({}) {
   update() {
-    if (this.input.gamepads.right?.getSelectEnd()) {
+    if (this.input.xr.gamepads.right?.getSelectEnd()) {
       this.capturePhoto();
     }
   }
@@ -351,7 +351,7 @@ class CameraSwitcherSystem extends createSystem({}) {
   }
 
   update() {
-    if (this.input.gamepads.right?.getButtonDown(0)) {
+    if (this.input.xr.gamepads.right?.getButtonDown(0)) {
       this.switchCamera();
     }
   }

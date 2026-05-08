@@ -186,7 +186,7 @@ class PlacementSystem extends createSystem({
   }
 
   update() {
-    const triggerPressed = this.input.gamepads.right?.getSelectStart();
+    const triggerPressed = this.input.xr.gamepads.right?.getSelectStart();
 
     if (triggerPressed && this.previewEntity) {
       const xrResult = this.previewEntity.getValue(

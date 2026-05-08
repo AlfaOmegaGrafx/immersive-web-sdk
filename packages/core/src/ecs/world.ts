@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { XRInputManager, XROrigin } from '@iwsdk/xr-input';
+import { XROrigin } from '@iwsdk/xr-input';
 import type { PointerEventsMap } from '@pmndrs/pointer-events';
 import { Signal, signal } from '@preact/signals-core';
 import { AnyComponent, World as ElicsWorld } from 'elics';
@@ -17,6 +17,7 @@ import {
   XROptions,
   launchXR,
 } from '../init/index.js';
+import type { InputManager } from '../input/index.js';
 import { LevelTag } from '../level/index.js';
 import type { MCPRuntime } from '../mcp/index.js';
 import type { Object3DEventMap } from '../runtime/index.js';
@@ -49,8 +50,8 @@ export type GradientColors = {
  * @remarks
  * - Construct a world with {@link World.create} (recommended) which wires the renderer, scene, default systems
  *   (Input, UI, Audio, Level) and starts the render loop.
- * - The world exposes convenience handles like {@link World.input | input} (XRInputManager),
- *   {@link World.player | player} (XROrigin), and {@link World.assetManager}.
+ * - The world exposes convenience handles like {@link World.input | input},
+ *   {@link World.player | player} (the persistent player/XR origin), and {@link World.assetManager}.
  * - Feature systems (Grabbing, Locomotion) are opt‑in via {@link WorldOptions.features}.
  *
  * @category Runtime
@@ -67,7 +68,7 @@ export type GradientColors = {
  * ```
  */
 export class World extends ElicsWorld {
-  public input!: XRInputManager;
+  public input!: InputManager;
   public player!: XROrigin;
   public assetManager!: typeof AssetManager;
   public scene!: Scene;
@@ -75,6 +76,7 @@ export class World extends ElicsWorld {
   public activeLevel!: Signal<Entity>;
   public activeLevelId: string = 'level:default';
   public camera!: PerspectiveCamera;
+  public cameraEntity!: Entity;
   public renderer!: WebGLRenderer;
   public session: XRSession | undefined;
   public visibilityState = signal(VisibilityState.NonImmersive);

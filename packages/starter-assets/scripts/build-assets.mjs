@@ -190,7 +190,7 @@ async function generateRecipeForStarter(starterDir, casRoot, casVersion) {
   const files = [];
 
   function transformTemplate(source, ctx) {
-    // Pass 1: feature anchors /* @chef:xr */, /* @chef:app */
+    // Pass 1: feature anchors /* @chef:xr */, /* @chef:app */, /* @chef:xr-config */
     // Scan, track brace/bracket stacks and last closed object/array; collect edits, then apply back-to-front
     const edits = [];
     let i = 0;
@@ -250,7 +250,11 @@ async function generateRecipeForStarter(starterDir, casRoot, casVersion) {
         const end = source.indexOf('*/', i + 2);
         const body = end !== -1 ? source.slice(i + 2, end) : '';
         const trimmed = body.trim();
-        if (trimmed === '@chef:xr' || trimmed === '@chef:app') {
+        if (
+          trimmed === '@chef:xr' ||
+          trimmed === '@chef:app' ||
+          trimmed === '@chef:xr-config'
+        ) {
           if (!lastClosed) {
             i = end + 2;
             continue;
@@ -258,7 +262,9 @@ async function generateRecipeForStarter(starterDir, casRoot, casVersion) {
           const placeholder =
             trimmed === '@chef:xr'
               ? '{{ @xrFeaturesStr }}'
-              : '{{ @appFeaturesStr }}';
+              : trimmed === '@chef:xr-config'
+                ? '{{ @xrConfigStr }}'
+                : '{{ @appFeaturesStr }}';
           edits.push({
             start: lastClosed.start,
             end: lastClosed.end + 1,
@@ -488,6 +494,9 @@ async function generateRecipeForStarter(starterDir, casRoot, casVersion) {
   const xrFeaturesObj = { handTracking: true };
   edits['@appFeaturesStr'] = toJsObjectLiteral(appFeaturesObj);
   edits['@xrFeaturesStr'] = toJsObjectLiteral(xrFeaturesObj);
+  edits['@xrConfigStr'] =
+    `{ sessionMode: SessionMode.Immersive${isAR ? 'AR' : 'VR'}, ` +
+    `offer: 'always', features: ${toJsObjectLiteral(xrFeaturesObj)} }`;
   edits['@appName'] = title;
 
   const recipe = { name: id, version: casVersion, edits };

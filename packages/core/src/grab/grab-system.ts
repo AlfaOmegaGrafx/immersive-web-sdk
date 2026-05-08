@@ -126,8 +126,8 @@ export class GrabSystem extends createSystem(
     );
 
     // Enable grab sub-pointer per hand when GrabSystem is active
-    this.input.multiPointers.left.toggleSubPointer('grab', true);
-    this.input.multiPointers.right.toggleSubPointer('grab', true);
+    this.input.xr.multiPointers.left.toggleSubPointer('grab', true);
+    this.input.xr.multiPointers.right.toggleSubPointer('grab', true);
   }
 
   update(delta: number, time: number): void {
@@ -135,15 +135,19 @@ export class GrabSystem extends createSystem(
     // Only forward if the system-level useHandPinchForGrab flag is enabled
     if (this.config.useHandPinchForGrab) {
       (['left', 'right'] as const).forEach((handedness) => {
-        if (this.input.isPrimary('hand', handedness)) {
+        if (this.input.xr.isPrimary('hand', handedness)) {
           const timeStamp = time * 1000;
-          if (this.input.gamepads[handedness]?.getSelectStart()) {
-            this.input.multiPointers[handedness].routeDown('squeeze', 'grab', {
-              timeStamp,
-            });
+          if (this.input.xr.gamepads[handedness]?.getSelectStart()) {
+            this.input.xr.multiPointers[handedness].routeDown(
+              'squeeze',
+              'grab',
+              {
+                timeStamp,
+              },
+            );
           }
-          if (this.input.gamepads[handedness]?.getSelectEnd()) {
-            this.input.multiPointers[handedness].routeUp('squeeze', 'grab', {
+          if (this.input.xr.gamepads[handedness]?.getSelectEnd()) {
+            this.input.xr.multiPointers[handedness].routeUp('squeeze', 'grab', {
               timeStamp,
             });
           }

@@ -125,3 +125,48 @@ describe('ecsStep', () => {
     );
   });
 });
+
+describe('ecsFindEntities', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    const { ComponentRegistry } = (await import('elics')) as any;
+    ComponentRegistry._clear();
+  });
+
+  it('lists mutable content before LevelRoot infrastructure entities', async () => {
+    const { ComponentRegistry } = (await import('elics')) as any;
+    const { ecsFindEntities } = await import(
+      '../../src/mcp/ecs-debug-tools.js'
+    );
+
+    const Transform = { id: 'Transform', schema: {} };
+    const LevelTag = { id: 'LevelTag', schema: {} };
+    const LevelRoot = { id: 'LevelRoot', schema: {} };
+    ComponentRegistry._register(Transform);
+    ComponentRegistry._register(LevelTag);
+    ComponentRegistry._register(LevelRoot);
+
+    const createEntity = (index: number, name: string, components: any[]) => ({
+      index,
+      active: true,
+      object3D: { name },
+      hasComponent: (component: any) => components.includes(component),
+      getComponents: () => components,
+    });
+
+    const world = {
+      entityManager: {
+        indexLookup: [
+          null,
+          createEntity(1, 'LevelRoot', [Transform, LevelTag, LevelRoot]),
+          createEntity(2, 'Robot', [Transform, LevelTag]),
+        ],
+      },
+    } as any;
+
+    const result = ecsFindEntities(world, { withComponents: ['LevelTag'] });
+
+    expect(result.entities.map((entity) => entity.entityIndex)).toEqual([2, 1]);
+    expect(result.total).toBe(2);
+  });
+});

@@ -106,31 +106,32 @@ export class TeleportSystem extends createSystem(
     // Validate target: must have hit AND normal must be mostly upward-facing (> 0.7)
     this.targetValid = hitTestTarget.visible && hitTestNormal.y > 0.7;
 
-    const gamepad = this.input.gamepads.right;
-    const pointerBusy = this.input.multiPointers.right.getRayBusy();
+    const gamepad = this.input.xr.gamepads.right;
+    const pointerBusy = this.input.xr.multiPointers.right.getRayBusy();
     let teleportActive = !!gamepad && !pointerBusy;
     const cancelAction =
       !gamepad ||
       pointerBusy ||
       gamepad !== this.activeInput ||
-      (this.input.isPrimary('hand', 'right') &&
+      (this.input.xr.isPrimary('hand', 'right') &&
         !this.config.microGestureControlsEnabled.value);
     this.activeInput = gamepad;
     if (teleportActive) {
       // if primary input exists and pointer is not busy, teleportActive is
       // decided by gamepad/hand input
-      if (this.input.isPrimary('hand', 'right')) {
+      if (this.input.xr.isPrimary('hand', 'right')) {
         // Only allow micro-gesture-based teleport when explicitly enabled
         if (this.config.microGestureControlsEnabled.value) {
           // In hand-tracking mode, keep teleport active until confirm (thumb tap)
-          teleportActive = !this.input.gamepads.right?.getButtonDownByIdx(9);
+          teleportActive = !this.input.xr.gamepads.right?.getButtonDownByIdx(9);
         } else {
           teleportActive = false;
         }
       } else {
         teleportActive =
-          this.input.gamepads.right?.getAxesState(InputComponent.Thumbstick) ===
-          AxesState.Down;
+          this.input.xr.gamepads.right?.getAxesState(
+            InputComponent.Thumbstick,
+          ) === AxesState.Down;
       }
     }
 
