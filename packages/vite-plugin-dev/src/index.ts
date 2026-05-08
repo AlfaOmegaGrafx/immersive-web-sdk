@@ -34,7 +34,6 @@ import type {
   DevPluginOptions,
   ProcessedDevOptions,
   InjectionBundleResult,
-  AiTool,
   AiMode,
 } from './types.js';
 

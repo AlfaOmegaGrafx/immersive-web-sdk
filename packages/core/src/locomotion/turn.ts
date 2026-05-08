@@ -5,11 +5,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { AxesState, InputComponent } from '@iwsdk/xr-input';
 import { Types } from '../ecs/component.js';
 import { createSystem } from '../ecs/system.js';
 import { Group, Mesh, Vector3 } from '../runtime/index.js';
 import { BeveledCylinderGeometry } from './geometries/beveled-cylinder.js';
+import {
+  ActionLocomotionInputProvider,
+  getRequiredInputProvider,
+} from './locomotion-input-provider.js';
 
 const unitVector = new Vector3(1, 1, 1);
 
@@ -39,6 +42,8 @@ export class TurnSystem extends createSystem(
     turningSpeed: { type: Types.Float32, default: 180 },
     /** Enable swipe‑gesture turning in hand‑tracking mode. */
     microGestureControlsEnabled: { type: Types.Boolean, default: false },
+    /** Action-backed input provider shared across locomotion systems. */
+    inputProvider: { type: Types.Object, default: undefined },
   },
 ) {
   private turnSignals = new Group();
@@ -53,8 +58,13 @@ export class TurnSystem extends createSystem(
     ),
   );
   private playerHeadPosition = new Vector3();
+  private inputProvider!: ActionLocomotionInputProvider;
 
   init() {
+    this.inputProvider = getRequiredInputProvider(
+      'TurnSystem',
+      this.config.inputProvider.value,
+    );
     this.turnSignals.add(this.leftSignal, this.rightSignal);
     this.leftSignal.position.set(-0.015, 0.02, 0);
     this.rightSignal.position.set(0.055, 0.02, 0);
@@ -83,39 +93,33 @@ export class TurnSystem extends createSystem(
   }
 
   private updateSmooth(delta: number): void {
-    const state = this.input.xr.gamepads.right?.getAxesState(
-      InputComponent.Thumbstick,
-    );
+    const turnAxis = this.inputProvider.getTurnAxis();
     const turningSpeedRadian = (this.config.turningSpeed.value / 180) * Math.PI;
-    if (state === AxesState.Left) {
-      this.player.rotateY(turningSpeedRadian * delta);
-    } else if (state === AxesState.Right) {
-      this.player.rotateY(-turningSpeedRadian * delta);
+    if (turnAxis !== 0) {
+      this.player.rotateY(-turnAxis * turningSpeedRadian * delta);
     }
   }
 
   private updateSnap(delta: number): void {
-    let turningLeft = false;
-    let turningRight = false;
-    const gamepad = this.input.xr.gamepads.right;
     const turningAngleRadian = (this.config.turningAngle.value / 180) * Math.PI;
-    if (this.input.xr.isPrimary('hand', 'right')) {
-      // Show and listen only if micro-gesture controls are enabled
-      const enabled = this.config.microGestureControlsEnabled.value;
-      this.turnSignals.visible = !!enabled;
-      if (enabled) {
-        this.player.head.getWorldPosition(this.playerHeadPosition);
-        this.turnSignals.lookAt(this.playerHeadPosition);
-        turningLeft = gamepad?.getButtonDownByIdx(5) || false;
-        turningRight = gamepad?.getButtonDownByIdx(6) || false;
-      }
+    const showSignals = this.inputProvider.shouldShowTurnSignals(
+      this.config.microGestureControlsEnabled.value,
+    );
+    this.turnSignals.visible = showSignals;
+    if (showSignals) {
+      this.player.head.getWorldPosition(this.playerHeadPosition);
+      this.turnSignals.lookAt(this.playerHeadPosition);
     } else {
       this.turnSignals.visible = false;
-      turningLeft =
-        gamepad?.getAxesEnteringLeft(InputComponent.Thumbstick) || false;
-      turningRight =
-        gamepad?.getAxesEnteringRight(InputComponent.Thumbstick) || false;
     }
+
+    const turningLeft = this.inputProvider.getTurnLeftDown(
+      this.config.microGestureControlsEnabled.value,
+    );
+    const turningRight = this.inputProvider.getTurnRightDown(
+      this.config.microGestureControlsEnabled.value,
+    );
+
     if (turningLeft) {
       this.player.rotateY(turningAngleRadian);
       if (this.turnSignals.visible) {

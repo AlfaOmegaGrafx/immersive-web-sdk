@@ -5,8 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { createHash } from 'crypto';
 import { spawnSync } from 'child_process';
+import { createHash } from 'crypto';
 import {
   createReadStream,
   createWriteStream,

@@ -13,9 +13,10 @@ IWSDK provides a comprehensive input system that handles browser canvas pointers
 - **Browser pointer events** - Mouse/touch events from the renderer canvas when `input.canvasPointerEvents` is enabled
 - **XR pointer events** - Ray, grab, and poke interactions from controllers and hands
 - **Keyboard and gamepad state** - `world.input.keyboard`, `world.input.browserGamepads`, and `world.input.xr.gamepads`
+- **Input actions** - `world.input.actions` maps low-level devices to framework intent such as locomotion movement and jump
 - **Built-in systems** - XR grab and locomotion work out of the box
 
-**Interaction Patterns**: Browser canvas clicks and XR rays both flow through pointer events and can set ECS `Hovered` / `Pressed` tags on interactable entities. **Grabbing** is an XR spatial interaction built on pointer events. **Locomotion** uses XR gamepad input because movement requires controls like analog thumbsticks for smooth navigation.
+**Interaction Patterns**: Browser canvas clicks and XR rays both flow through pointer events and can set ECS `Hovered` / `Pressed` tags on interactable entities. **Grabbing** is an XR spatial interaction built on pointer events. **Locomotion** uses action-backed input: XR thumbsticks are enabled by default, and browser keyboard/gamepad bindings can be enabled explicitly for first-person browser apps.
 
 ::: tip Learn More About Input
 For a deep dive into IWSDK's input architecture, see [XR Input Concepts](/concepts/xr-input/index.md).
@@ -159,6 +160,23 @@ Once enabled, locomotion works automatically with standard VR controls:
 - **Teleportation**: Point and click to teleport (if enabled)
 
 The locomotion system handles collision detection, ground snapping, and comfortable movement speeds automatically.
+
+### Browser Locomotion
+
+For first-person browser apps, opt into browser action bindings instead of wiring systems directly to keys:
+
+```javascript
+World.create(document.getElementById('scene-container'), {
+  xr: false,
+  features: {
+    locomotion: {
+      browserControls: true,
+    },
+  },
+});
+```
+
+This maps WASD/arrow keys, Space, and standard browser gamepads into locomotion actions. IWSDK still does not own your browser camera controls: pointer lock, touch look, orbit, follow, and third-person cameras remain app-authored. In first-person browser apps, rotate `world.camera` and let locomotion move `world.player`.
 
 ::: tip Learn More About Locomotion
 For detailed locomotion configuration and movement types, see [Locomotion Concepts](/concepts/locomotion/index.md).

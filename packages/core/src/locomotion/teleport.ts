@@ -6,7 +6,6 @@
  */
 
 import { Locomotor, sampleParabolicCurve } from '@iwsdk/locomotor';
-import { AxesState, InputComponent, StatefulGamepad } from '@iwsdk/xr-input';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { Types, createSystem } from '../ecs/index.js';
@@ -17,6 +16,10 @@ import {
   RingGeometry,
   Vector3,
 } from '../runtime/index.js';
+import {
+  ActionLocomotionInputProvider,
+  getRequiredInputProvider,
+} from './locomotion-input-provider.js';
 import { LineMaterial } from './materials/line.js';
 
 const Colors = {
@@ -47,6 +50,8 @@ export class TeleportSystem extends createSystem(
     rayGravity: { type: Types.Float32, default: -0.4 },
     /** Locomotor engine used for hit testing and teleport execution. */
     locomotor: { type: Types.Object, default: undefined },
+    /** Action-backed input provider shared across locomotion systems. */
+    inputProvider: { type: Types.Object, default: undefined },
     /** Enable hand‑tracking micro‑gesture flow for activation/confirm. */
     microGestureControlsEnabled: { type: Types.Boolean, default: false },
   },
@@ -59,11 +64,15 @@ export class TeleportSystem extends createSystem(
   private markerMat!: MeshBasicMaterial;
   private line!: Line2;
   private teleportWasActive = false;
-  private activeInput: StatefulGamepad | undefined;
   private locomotor!: Locomotor;
+  private inputProvider!: ActionLocomotionInputProvider;
 
   init() {
     this.locomotor = this.config.locomotor.value as Locomotor;
+    this.inputProvider = getRequiredInputProvider(
+      'TeleportSystem',
+      this.config.inputProvider.value,
+    );
     this.markerMat = new MeshBasicMaterial();
     this.teleportMarker = new Mesh(
       new RingGeometry(0.12, 0.15).translate(0, 0, 0.02),
@@ -106,32 +115,17 @@ export class TeleportSystem extends createSystem(
     // Validate target: must have hit AND normal must be mostly upward-facing (> 0.7)
     this.targetValid = hitTestTarget.visible && hitTestNormal.y > 0.7;
 
-    const gamepad = this.input.xr.gamepads.right;
     const pointerBusy = this.input.xr.multiPointers.right.getRayBusy();
-    let teleportActive = !!gamepad && !pointerBusy;
-    const cancelAction =
-      !gamepad ||
-      pointerBusy ||
-      gamepad !== this.activeInput ||
-      (this.input.xr.isPrimary('hand', 'right') &&
-        !this.config.microGestureControlsEnabled.value);
-    this.activeInput = gamepad;
+    let teleportActive = this.inputProvider.getTeleportActive(
+      pointerBusy,
+      this.config.microGestureControlsEnabled.value,
+    );
+
     if (teleportActive) {
-      // if primary input exists and pointer is not busy, teleportActive is
-      // decided by gamepad/hand input
-      if (this.input.xr.isPrimary('hand', 'right')) {
-        // Only allow micro-gesture-based teleport when explicitly enabled
-        if (this.config.microGestureControlsEnabled.value) {
-          // In hand-tracking mode, keep teleport active until confirm (thumb tap)
-          teleportActive = !this.input.xr.gamepads.right?.getButtonDownByIdx(9);
-        } else {
-          teleportActive = false;
-        }
-      } else {
-        teleportActive =
-          this.input.xr.gamepads.right?.getAxesState(
-            InputComponent.Thumbstick,
-          ) === AxesState.Down;
+      if (
+        !this.inputProvider.getTeleportRay(this.rayOrigin, this.rayDirection)
+      ) {
+        teleportActive = false;
       }
     }
 
@@ -140,8 +134,6 @@ export class TeleportSystem extends createSystem(
         this.line.visible = true;
         this.teleportMarker.visible = true;
       }
-      this.player.raySpaces.right.getWorldPosition(this.rayOrigin);
-      this.player.raySpaces.right.getWorldDirection(this.rayDirection);
 
       const minY = Math.max(
         this.player.position.y,
@@ -178,7 +170,12 @@ export class TeleportSystem extends createSystem(
         0.2,
       );
     } else if (this.teleportWasActive) {
-      if (!cancelAction && this.targetValid) {
+      if (
+        this.targetValid &&
+        this.inputProvider.getTeleportCommit(
+          this.config.microGestureControlsEnabled.value,
+        )
+      ) {
         // Teleport to the hit test target position
         this.locomotor.teleport(this.teleportMarker.position);
       }

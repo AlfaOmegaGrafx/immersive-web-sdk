@@ -9,8 +9,8 @@ import {
 import { mkdir, rename, rm, stat } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import * as tar from 'tar';
 import { fileURLToPath } from 'url';
+import * as tar from 'tar';
 
 export type ReferenceEmbeddingModelDType =
   | 'auto'

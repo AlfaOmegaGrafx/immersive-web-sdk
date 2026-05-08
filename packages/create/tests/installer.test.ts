@@ -8,7 +8,9 @@
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import crossSpawn from 'cross-spawn';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { installDependenciesFromBundle } from '../src/installer.js';
 import type { ResolvedSource } from '../src/source.js';
 
 // Mock cross-spawn before importing installer
@@ -32,10 +34,6 @@ vi.mock('cross-spawn', () => {
     },
   };
 });
-
-// Import after mock setup
-import { installDependenciesFromBundle } from '../src/installer.js';
-import crossSpawn from 'cross-spawn';
 
 /** Create a fake ResolvedSource that maps known packages to file: paths */
 function makeFakeSource(packageMap: Record<string, string>): ResolvedSource {

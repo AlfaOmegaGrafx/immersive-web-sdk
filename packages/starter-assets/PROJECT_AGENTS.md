@@ -75,7 +75,7 @@ IWSDK is a 3D web framework with first-class XR support. XR can be disabled for 
 - `world.camera.position` is local to `world.player`. Use `world.camera.getWorldPosition(tempVector)` when logic needs the actual viewer position.
 - Configure the initial browser view with `render.camera` in `World.create`; do not add camera category presets unless the app explicitly needs one.
 
-Browser pointer input is enabled through `input.canvasPointerEvents` by default. Add `Interactable`/`RayInteractable` and react to `Hovered`/`Pressed` for objects that should work with both mouse/touch canvas input and XR rays. XR-specific input lives at `world.input.xr`; use `world.input.keyboard` and `world.input.browserGamepads` for browser controls.
+Browser pointer input is enabled through `input.canvasPointerEvents` by default. Add `Interactable`/`RayInteractable` and react to `Hovered`/`Pressed` for objects that should work with both mouse/touch canvas input and XR rays. XR-specific input lives at `world.input.xr`; use `world.input.keyboard` and `world.input.browserGamepads` for low-level browser controls. Reusable systems should prefer `world.input.actions` for intent such as `locomotion.move` or `locomotion.jump`; opt into browser locomotion bindings with `features.locomotion.browserControls`.
 
 ### Feature Configuration (CRITICAL!)
 

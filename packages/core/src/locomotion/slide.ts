@@ -6,7 +6,6 @@
  */
 
 import { Locomotor } from '@iwsdk/locomotor';
-import { InputComponent } from '@iwsdk/xr-input';
 import { lerp } from 'three/src/math/MathUtils.js';
 import { Types, createSystem } from '../ecs/index.js';
 import {
@@ -19,6 +18,10 @@ import {
   Vector2,
   Vector3,
 } from '../runtime/index.js';
+import {
+  ActionLocomotionInputProvider,
+  getRequiredInputProvider,
+} from './locomotion-input-provider.js';
 
 const vertexShader = `
 	varying vec2 vUv;
@@ -72,7 +75,7 @@ const createVignette = (radius: number, colorRep: number = 0x000000) => {
  * - Reads left controller thumbstick for planar movement relative to head yaw.
  * - Applies a dynamic peripheral vignette based on input magnitude scaled by
  *   `comfortAssist` to reduce motion sickness.
- * - Triggers jump when `jumpButton` is pressed.
+ * - Triggers jump when the locomotion jump action is pressed.
  *
  * @category Locomotion
  */
@@ -81,12 +84,12 @@ export class SlideSystem extends createSystem(
   {
     /** Locomotor engine shared across locomotion systems. */
     locomotor: { type: Types.Object, default: undefined },
+    /** Action-backed input provider shared across locomotion systems. */
+    inputProvider: { type: Types.Object, default: undefined },
     /** Maximum linear speed in meters/second. */
     maxSpeed: { type: Types.Float32, default: 5 },
     /** Comfort vignette strength [0..1]; 0 disables vignetting. */
     comfortAssist: { type: Types.Float32, default: 0.5 },
-    /** Button used to trigger jump. */
-    jumpButton: { type: Types.String, default: InputComponent.A_Button },
     /** Whether jumping is enabled. */
     enableJumping: { type: Types.Boolean, default: true },
   },
@@ -98,10 +101,15 @@ export class SlideSystem extends createSystem(
   private vignette = createVignette(0.3);
   private vignetteAlphaTarget = 0;
   private locomotor!: Locomotor;
+  private inputProvider!: ActionLocomotionInputProvider;
 
   init() {
     this.locomotor = this.config.locomotor.value as Locomotor;
-    this.player.head.add(this.vignette);
+    this.inputProvider = getRequiredInputProvider(
+      'SlideSystem',
+      this.config.inputProvider.value,
+    );
+    this.camera.add(this.vignette);
   }
 
   destroy(): void {
@@ -112,28 +120,18 @@ export class SlideSystem extends createSystem(
     this.vignetteAlphaTarget = 0;
 
     // Handle jump input
-    if (
-      this.config.enableJumping.value &&
-      this.input.xr.gamepads.right?.getButtonDown(
-        this.config.jumpButton.value as InputComponent,
-      )
-    ) {
+    if (this.config.enableJumping.value && this.inputProvider.getJumpDown()) {
       this.locomotor.jump();
     }
 
-    if (this.input.xr.isPrimary('controller', 'left')) {
-      this.input2D.copy(
-        this.input.xr.gamepads.left?.getAxesValues(
-          InputComponent.Thumbstick,
-        ) || {
-          x: 0,
-          y: 0,
-        },
-      );
+    this.inputProvider.getMoveAxis(this.input2D);
+    {
       this.movementVector.set(this.input2D.x, 0, this.input2D.y);
-      const inputValue = this.input2D.length();
+      const inputValue = Math.min(this.input2D.length(), 1);
       if (inputValue > 0) {
-        this.player.head.getWorldQuaternion(this.movementDirection);
+        this.inputProvider.getMovementReferenceQuaternion(
+          this.movementDirection,
+        );
         this.movementVector.applyQuaternion(this.movementDirection);
         this.movementVector.y = 0;
         this.movementVector

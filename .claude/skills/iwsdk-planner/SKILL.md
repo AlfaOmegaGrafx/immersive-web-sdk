@@ -17,7 +17,7 @@ IWSDK is built on three pillars:
 
 IWSDK is a 3D web framework with first-class XR support. `World.create()` always creates a persistent `world.player` origin and keeps `world.camera` under it, even when `xr: false` is used for browser-only apps. For first-person browser movement, move `world.player`; for orbit, editor, product, cinematic, or third-person cameras, it is fine to keep `world.player` at the origin and drive `world.camera`. Remember that `world.camera.position` is local to `world.player`, so use `camera.getWorldPosition(...)` when world-space viewer position matters.
 
-Use `input.canvasPointerEvents` for browser mouse/touch canvas events. Browser canvas pointers and XR rays both feed Three/Object3D pointer events and ECS `Hovered`/`Pressed` tags on `Interactable`/`RayInteractable` entities. XR-specific input is available at `world.input.xr`; keyboard and standard browser gamepads live at `world.input.keyboard` and `world.input.browserGamepads`.
+Use `input.canvasPointerEvents` for browser mouse/touch canvas events. Browser canvas pointers and XR rays both feed Three/Object3D pointer events and ECS `Hovered`/`Pressed` tags on `Interactable`/`RayInteractable` entities. XR-specific input is available at `world.input.xr`; keyboard and standard browser gamepads live at `world.input.keyboard` and `world.input.browserGamepads`. Reusable systems should prefer `world.input.actions` for intent such as `locomotion.move` or `locomotion.jump`; opt into browser locomotion bindings with `features.locomotion.browserControls`.
 
 ## Critical Best Practices
 
@@ -633,7 +633,6 @@ locomotion.config.jumpHeight.value = 1.5;
 locomotion.config.jumpCooldown.value = 0.1;
 locomotion.config.maxDropDistance.value = 5.0;
 locomotion.config.useWorker.value = true;
-locomotion.config.jumpButton.value = InputComponent.A_Button; // Button that triggers jump
 locomotion.config.enableJumping.value = true; // Enable/disable jumping entirely
 locomotion.config.initialPlayerPosition.value = [0, 0, 0]; // Starting position
 ```

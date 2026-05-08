@@ -8,4 +8,5 @@
 export * from './slide.js';
 export * from './teleport.js';
 export * from './turn.js';
+export * from './locomotion-input-provider.js';
 export * from './locomotion.js';

@@ -18,7 +18,8 @@ import {
 
 /**
  * CameraSystem - Manages camera stream lifecycle for CameraSource components
- * Automatically starts streams when XR session is active, stops when inactive
+ * Automatically starts streams when the world is visible, including browser
+ * non-immersive mode and immersive XR sessions.
  *
  * System is stateless - all state is stored in CameraSource components
  */
@@ -26,9 +27,9 @@ export class CameraSystem extends createSystem({
   cameras: { required: [CameraSource] },
 }) {
   init() {
-    // Stop all cameras when leaving XR
+    // Stop all cameras only when the page/session is hidden.
     this.world.visibilityState.subscribe((state) => {
-      if (state !== VisibilityState.Visible) {
+      if (state === VisibilityState.Hidden) {
         for (const entity of this.queries.cameras.entities) {
           this.stopCamera(entity);
         }
@@ -37,10 +38,8 @@ export class CameraSystem extends createSystem({
   }
 
   update() {
-    // Only manage cameras when XR is active
-    const isXRActive =
-      this.world.visibilityState.value === VisibilityState.Visible;
-    if (!isXRActive) {
+    // CameraSource uses browser media APIs and works outside immersive XR.
+    if (this.world.visibilityState.value === VisibilityState.Hidden) {
       return;
     }
 

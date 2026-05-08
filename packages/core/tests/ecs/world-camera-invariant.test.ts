@@ -5,9 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Group, PerspectiveCamera, Scene } from '../../src/runtime/index.js';
 import { describe, expect, it } from 'vitest';
 import { attachCameraToPlayer } from '../../src/init/player-camera.js';
+import { Group, PerspectiveCamera, Scene } from '../../src/runtime/index.js';
 
 describe('World player/camera invariant', () => {
   it('keeps the main camera under the player origin', () => {

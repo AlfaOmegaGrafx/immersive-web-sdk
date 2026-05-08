@@ -4,7 +4,7 @@ outline: [2, 4]
 
 # Chapter 13: Camera Access
 
-The IWSDK provides a camera access system that enables XR applications to access device cameras for video streaming, photo capture, and computer vision tasks. This chapter covers implementing camera access in your WebXR applications.
+The IWSDK provides a camera access system that enables browser and XR applications to access device cameras for video streaming, photo capture, and computer vision tasks.
 
 ## What You'll Build
 
@@ -18,7 +18,7 @@ By the end of this chapter, you'll be able to:
 
 ## Overview
 
-The camera system leverages the browser's MediaDevices API to provide seamless camera access in XR sessions. The system automatically manages the camera lifecycle, starting streams when entering XR and stopping them when exiting.
+The camera system leverages the browser's MediaDevices API. The system automatically manages the camera lifecycle while the world is visible, including non-immersive browser mode and immersive XR sessions.
 
 ### Key Components
 
@@ -103,7 +103,7 @@ cameraEntity.addComponent(CameraSource, {
 });
 ```
 
-**Important**: The camera only activates when the XR session is visible.
+**Important**: The camera activates while the world is visible. It works in browser-only worlds created with `xr: false` and in visible XR sessions, and it stops streams when the page/session is hidden.
 
 ## Understanding the Components
 

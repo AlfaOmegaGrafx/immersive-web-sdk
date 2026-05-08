@@ -168,6 +168,10 @@ gtag('config', 'G-V03QDNGKY3');`,
               text: '15 Depth Occlusion',
               link: '/guides/15-depth-occlusion',
             },
+            {
+              text: '16 Browser-First Systems',
+              link: '/guides/16-browser-first-systems',
+            },
           ],
         },
       ],
@@ -209,6 +213,7 @@ gtag('config', 'G-V03QDNGKY3');`,
           link: '/concepts/xr-input/',
           items: [
             { text: 'Input Visuals', link: '/concepts/xr-input/input-visuals' },
+            { text: 'Input Actions', link: '/concepts/xr-input/actions' },
             { text: 'Pointers', link: '/concepts/xr-input/pointers' },
             {
               text: 'Stateful Gamepad',

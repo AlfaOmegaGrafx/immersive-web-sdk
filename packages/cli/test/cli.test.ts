@@ -17,12 +17,12 @@ import {
 } from '@iwsdk/cli/contract';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { WebSocketServer } from 'ws';
+import type { AiTool } from '../src/runtime-contract.js';
 import {
   getRuntimeSessionFilePath,
   registerRuntimeSession,
   unregisterRuntimeSession,
 } from '../src/runtime-state.js';
-import type { AiTool } from '../src/runtime-contract.js';
 
 const CLI_PATH = path.join(
   '/Users/fe1ix/Projects/webxr-dev-platform/immersive-web-sdk',

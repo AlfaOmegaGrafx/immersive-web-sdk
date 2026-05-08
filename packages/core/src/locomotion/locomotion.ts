@@ -6,11 +6,14 @@
  */
 
 import { EnvironmentType, Locomotor, LocomotorConfig } from '@iwsdk/locomotor';
-import { InputComponent } from '@iwsdk/xr-input';
 import { Types, createComponent } from '../ecs/component.js';
 import { Entity } from '../ecs/entity.js';
 import { createSystem } from '../ecs/system.js';
 import { Vector3 } from '../runtime/index.js';
+import {
+  ActionLocomotionInputProvider,
+  type BrowserLocomotionControls,
+} from './locomotion-input-provider.js';
 import { SlideSystem } from './slide.js';
 import { TeleportSystem } from './teleport.js';
 import { TurnSystem, TurningMethod } from './turn.js';
@@ -88,13 +91,14 @@ export class LocomotionSystem extends createSystem(
     jumpHeight: { type: Types.Float32, default: 1.5 },
     /** Minimum seconds between jumps. */
     jumpCooldown: { type: Types.Float32, default: 0.1 },
-    /** Button used to jump in SlideSystem. */
-    jumpButton: { type: Types.String, default: InputComponent.A_Button },
     /** Whether jumping is enabled. */
     enableJumping: { type: Types.Boolean, default: true },
+    /** Optional browser bindings for action-backed first-person locomotion. */
+    browserControls: { type: Types.Object, default: false },
   },
 ) {
   private locomotor!: Locomotor;
+  private inputProvider!: ActionLocomotionInputProvider;
 
   private teleportSystem?: TeleportSystem;
   private slideSystem?: SlideSystem;
@@ -102,12 +106,18 @@ export class LocomotionSystem extends createSystem(
   private microGestureControlsEnabled = false;
 
   init() {
+    this.inputProvider = new ActionLocomotionInputProvider(this.world);
+    this.inputProvider.enableBrowserControls(
+      this.config.browserControls.value as BrowserLocomotionControls,
+    );
+
     this.world.registerSystem(TurnSystem, {
       configData: {
         turningMethod: this.config.turningMethod.value,
         turningAngle: this.config.turningAngle.value,
         turningSpeed: this.config.turningSpeed.value,
         microGestureControlsEnabled: false,
+        inputProvider: this.inputProvider,
       },
     });
     this.turnSystem = this.world.getSystem(TurnSystem)!;
@@ -147,11 +157,6 @@ export class LocomotionSystem extends createSystem(
         this.config.jumpCooldown.subscribe((value) => {
           this.locomotor.updateConfig({ jumpCooldown: value });
         }),
-        this.config.jumpButton.subscribe((value) => {
-          if (this.slideSystem) {
-            this.slideSystem.config.jumpButton.value = value;
-          }
-        }),
         this.config.enableJumping.subscribe((value) => {
           if (this.slideSystem) {
             this.slideSystem.config.enableJumping.value = value;
@@ -189,6 +194,7 @@ export class LocomotionSystem extends createSystem(
       configData: {
         rayGravity: this.config.rayGravity.value,
         locomotor: this.locomotor,
+        inputProvider: this.inputProvider,
         microGestureControlsEnabled: false,
       },
     });
@@ -196,9 +202,9 @@ export class LocomotionSystem extends createSystem(
       configData: {
         maxSpeed: this.config.slidingSpeed.value,
         comfortAssist: this.config.comfortAssist.value,
-        jumpButton: this.config.jumpButton.value,
         enableJumping: this.config.enableJumping.value,
         locomotor: this.locomotor,
+        inputProvider: this.inputProvider,
       },
     });
 

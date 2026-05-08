@@ -361,8 +361,8 @@ Assert:
 
 - `LocomotionSystem` at priority -5
 - `TurnSystem` at priority 0 with config keys: `turningMethod`, `turningAngle`, `turningSpeed`
-- `SlideSystem` at priority 0 with config keys: `locomotor`, `maxSpeed`, `comfortAssist`, `jumpButton`, `enableJumping`
-- `TeleportSystem` at priority 0 with config keys: `rayGravity`, `locomotor`
+- `SlideSystem` at priority 0 with config keys: `locomotor`, `inputProvider`, `maxSpeed`, `comfortAssist`, `enableJumping`
+- `TeleportSystem` at priority 0 with config keys: `rayGravity`, `locomotor`, `inputProvider`
 
 Verify `Elevator` component and `ElevatorSystem`:
 

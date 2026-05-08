@@ -7,6 +7,7 @@
 
 import { XRInputManager } from '@iwsdk/xr-input';
 import { WebXRManager } from '../runtime/index.js';
+import { InputActionManager } from './input-actions.js';
 import { StatefulBrowserGamepad } from './stateful-browser-gamepad.js';
 import { StatefulKeyboard } from './stateful-keyboard.js';
 
@@ -44,11 +45,13 @@ export class InputManager {
   public readonly keyboard: StatefulKeyboard;
   public readonly browserGamepads: Array<StatefulBrowserGamepad | undefined> =
     [];
+  public readonly actions: InputActionManager;
   public readonly canvasPointerEvents: NormalizedCanvasPointerEventsOptions;
 
   constructor(xr: XRInputManager, options: InputManagerOptions = {}) {
     this.xr = xr;
     this.keyboard = new StatefulKeyboard();
+    this.actions = new InputActionManager();
     this.canvasPointerEvents = normalizeCanvasPointerEventsOptions(
       options.canvasPointerEvents,
     );
@@ -85,6 +88,11 @@ export class InputManager {
     this.keyboard.update();
     this.updateBrowserGamepads();
     this.xr.update(xrManager, delta, time);
+    this.actions.update({
+      keyboard: this.keyboard,
+      browserGamepads: this.browserGamepads,
+      xr: this.xr,
+    });
   }
 
   destroy(): void {

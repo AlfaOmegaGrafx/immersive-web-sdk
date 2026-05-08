@@ -17,13 +17,13 @@ import {
 } from 'elics';
 import type { QueryManager } from 'elics/lib/query-manager.js';
 import { Object3D } from 'three';
+import type { InputManager } from '../input/index.js';
 import {
   PerspectiveCamera,
   Scene,
   WebGLRenderer,
   WebXRManager,
 } from '../runtime/index.js';
-import type { InputManager } from '../input/index.js';
 import { Entity } from './entity.js';
 import type { VisibilityState, World } from './world';
 

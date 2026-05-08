@@ -5,8 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { StatefulButtonAxesDevice } from './stateful-button-axes-device.js';
 import type { InputConfig } from '../visual/adapter/base-visual-adapter.js';
+import { StatefulButtonAxesDevice } from './stateful-button-axes-device.js';
 export { AxesState } from './stateful-button-axes-device.js';
 
 export enum InputComponent {

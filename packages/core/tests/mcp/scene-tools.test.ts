@@ -6,10 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  getSceneHierarchy,
-  type HierarchyNode,
-} from '../../src/mcp/scene-tools.js';
+import { getSceneHierarchy } from '../../src/mcp/scene-tools.js';
 
 // ---------------------------------------------------------------------------
 // Minimal Object3D mock (only the properties scene-tools uses)

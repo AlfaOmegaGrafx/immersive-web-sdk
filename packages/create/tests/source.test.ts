@@ -12,7 +12,6 @@ import {
   NpmSource,
   BundleSource,
   SDK_PACKAGES_DIR,
-  DEFAULT_BUNDLE_URL,
 } from '../src/source.js';
 import type { BundleManifest } from '../src/source.js';
 

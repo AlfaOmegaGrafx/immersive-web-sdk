@@ -123,7 +123,7 @@ export async function validateCliPath(cliPath: string): Promise<void> {
     if (platform !== 'win32') {
       try {
         await fs.access(cliPath, fs.constants.X_OK);
-      } catch (error) {
+      } catch {
         const errorMessage = [
           `❌ Meta Spatial Editor CLI found but is not executable: ${cliPath}`,
           '',

@@ -9,6 +9,7 @@ import { mkdir, readFile, realpath, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { readAdapterStatus } from '../src/commands/adapter.js';
 import {
   getManagedMcpServerRegistry,
   mergeJsonConfig,
@@ -16,7 +17,6 @@ import {
   pruneMcpAdapters,
   syncMcpAdapters,
 } from '../src/mcp-adapters.js';
-import { readAdapterStatus } from '../src/commands/adapter.js';
 
 let tempDir: string;
 let appA: string;

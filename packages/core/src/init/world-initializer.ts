@@ -41,7 +41,11 @@ import {
 } from '../layers/index.js';
 import { LevelTag, LevelRoot } from '../level/index.js';
 import { LevelSystem } from '../level/index.js';
-import { LocomotionSystem, TurningMethod } from '../locomotion/index.js';
+import {
+  type BrowserLocomotionControls,
+  LocomotionSystem,
+  TurningMethod,
+} from '../locomotion/index.js';
 import { MCPRuntime } from '../mcp/index.js';
 import {
   PhysicsBody,
@@ -73,6 +77,7 @@ import {
   ColorScheme,
 } from '../ui/index.js';
 import { Visibility, VisibilitySystem } from '../visibility/index.js';
+import { attachCameraToPlayer } from './player-camera.js';
 import {
   ReferenceSpaceType,
   SessionMode,
@@ -81,7 +86,6 @@ import {
   resolveReferenceSpaceType,
   buildSessionInit,
 } from './index.js';
-import { attachCameraToPlayer } from './player-camera.js';
 
 /** Options for {@link initializeWorld} / {@link World.create}.
  *
@@ -141,6 +145,15 @@ export type WorldOptions = {
           turningMethod?: TurningMethod;
           /** Whether jumping is enabled. @defaultValue true */
           enableJumping?: boolean;
+          /**
+           * Opt into browser-first locomotion bindings such as WASD, Space,
+           * and standard browser gamepad movement. Camera ownership remains
+           * app-controlled: rotate `world.camera` yourself for pointer-lock,
+           * orbit, touch-look, or follow cameras. Locomotion moves
+           * `world.player` along the camera's forward direction.
+           * @defaultValue false
+           */
+          browserControls?: BrowserLocomotionControls;
         };
     /** Grabbing (one/two‑hand, distance). @defaultValue false */
     grabbing?: boolean | { useHandPinchForGrab?: boolean };
@@ -587,6 +600,7 @@ function registerFeatureSystems(
         comfortAssistLevel?: number;
         turningMethod?: TurningMethod;
         enableJumping?: boolean;
+        browserControls?: BrowserLocomotionControls;
       };
   const locomotionEnabled = !!locomotion;
   const grabbing = config.features.grabbing as
@@ -620,6 +634,7 @@ function registerFeatureSystems(
               comfortAssist: locomotion.comfortAssistLevel,
               turningMethod: locomotion.turningMethod,
               enableJumping: locomotion.enableJumping,
+              browserControls: locomotion.browserControls,
             }).filter(([, v]) => v !== undefined),
           )
         : undefined;
