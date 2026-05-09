@@ -69,6 +69,7 @@ export class CursorVisual {
     );
     this.cursor.renderOrder = Infinity;
     this.cursor.userData.attached = true;
+    this.cursor.visible = false;
     this.zOffset = 0.004 + (pointerIndex + cursorCount++) * 0.001;
     xrOrigin.add(this.cursor);
   }

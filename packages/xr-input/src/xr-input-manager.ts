@@ -162,6 +162,8 @@ export class XRInputManager {
     if (!session) {
       if (this.hadSession) {
         this.onSessionEnded();
+      } else {
+        this.disablePointers(time);
       }
       this.hadSession = false;
       return;
@@ -171,6 +173,7 @@ export class XRInputManager {
     const refSpace = xrManager.getReferenceSpace();
     const frame = xrManager.getFrame();
     if (!refSpace || !frame) {
+      this.disablePointers(time);
       return;
     }
 
@@ -210,9 +213,13 @@ export class XRInputManager {
     this.visualAdapters.right.value = undefined;
 
     // Hide pointer visuals and disable combined pointers
+    this.disablePointers();
+  }
+
+  private disablePointers(time = 0): void {
     try {
-      this.multiPointers.left.update(false, 0, 0);
-      this.multiPointers.right.update(false, 0, 0);
+      this.multiPointers.left.update(false, 0, time);
+      this.multiPointers.right.update(false, 0, time);
     } catch {}
   }
 

@@ -50,8 +50,20 @@ async function gatherPnpmPackages(root) {
       const nmEntries = await fs.readdir(maybeNm, { withFileTypes: true });
       for (const e2 of nmEntries) {
         if (!e2.isDirectory()) continue;
-        const pj = path.join(maybeNm, e2.name, 'package.json');
-        if (await pathExists(pj)) out.push(pj);
+        if (e2.name.startsWith('@')) {
+          const scopeDir = path.join(maybeNm, e2.name);
+          const scopedEntries = await fs.readdir(scopeDir, {
+            withFileTypes: true,
+          });
+          for (const scoped of scopedEntries) {
+            if (!scoped.isDirectory()) continue;
+            const pj = path.join(scopeDir, scoped.name, 'package.json');
+            if (await pathExists(pj)) out.push(pj);
+          }
+        } else {
+          const pj = path.join(maybeNm, e2.name, 'package.json');
+          if (await pathExists(pj)) out.push(pj);
+        }
       }
     } catch {}
   }
@@ -113,6 +125,141 @@ function summarize(rangesMap) {
     return b.count - a.count;
   });
   return rows;
+}
+
+function rangeFromComparators(comparators) {
+  let exact = null;
+  let lower = null;
+  let upper = null;
+  const other = [];
+
+  for (const comparator of comparators) {
+    if (!comparator.value) continue;
+    const parsed = comparator.value.match(/^(<=|>=|<|>|=)?\s*(.+)$/);
+    const op = parsed?.[1] || '=';
+    const version = comparator.semver;
+    if (!version || version.version === 'ANY') {
+      continue;
+    }
+
+    if (op === '=') {
+      exact = comparator;
+    } else if (op === '>' || op === '>=') {
+      if (
+        !lower ||
+        semver.gt(version, lower.semver) ||
+        (semver.eq(version, lower.semver) &&
+          op === '>' &&
+          lower.operator === '>=')
+      ) {
+        lower = comparator;
+      }
+    } else if (op === '<' || op === '<=') {
+      if (
+        !upper ||
+        semver.lt(version, upper.semver) ||
+        (semver.eq(version, upper.semver) &&
+          op === '<' &&
+          upper.operator === '<=')
+      ) {
+        upper = comparator;
+      }
+    } else {
+      other.push(comparator.value);
+    }
+  }
+
+  if (exact) {
+    const exactVersion = exact.semver.version;
+    const rawRange =
+      comparators
+        .map((comparator) => comparator.value)
+        .filter(Boolean)
+        .join(' ') || '*';
+    return semver.satisfies(exactVersion, rawRange, {
+      includePrerelease: true,
+    })
+      ? exactVersion
+      : `${exactVersion} <0.0.0-0`;
+  }
+
+  const range = [lower?.value, upper?.value, ...other]
+    .filter(Boolean)
+    .join(' ');
+  return range || '*';
+}
+
+function isSatisfiableRange(range) {
+  try {
+    const min = semver.minVersion(range);
+    return min
+      ? semver.satisfies(min, range, { includePrerelease: true })
+      : false;
+  } catch {
+    return false;
+  }
+}
+
+function isSubsetOf(a, b) {
+  try {
+    return semver.subset(a, b, { includePrerelease: true });
+  } catch {
+    return false;
+  }
+}
+
+function sortRangesAscending(a, b) {
+  const av = semver.minVersion(a);
+  const bv = semver.minVersion(b);
+  if (av && bv) {
+    const cmp = semver.compare(av, bv);
+    if (cmp !== 0) return cmp;
+  } else if (av && !bv) {
+    return -1;
+  } else if (!av && bv) {
+    return 1;
+  }
+  return a.localeCompare(b);
+}
+
+function pruneRedundantRanges(ranges) {
+  const unique = [...new Set(ranges)].sort(sortRangesAscending);
+  return unique.filter(
+    (range, index) =>
+      !unique.some(
+        (other, otherIndex) => index !== otherIndex && isSubsetOf(range, other),
+      ),
+  );
+}
+
+function intersectRangeParts(left, right) {
+  const out = [];
+  const leftRange = new semver.Range(left);
+  const rightRange = new semver.Range(right);
+  for (const leftSet of leftRange.set) {
+    for (const rightSet of rightRange.set) {
+      const candidate = semver.validRange(
+        rangeFromComparators([...leftSet, ...rightSet]),
+      );
+      if (candidate && isSatisfiableRange(candidate)) {
+        out.push(candidate);
+      }
+    }
+  }
+  return pruneRedundantRanges(out);
+}
+
+function intersectRanges(ranges) {
+  let compatible = ['*'];
+  for (const range of ranges) {
+    const next = [];
+    for (const existing of compatible) {
+      next.push(...intersectRangeParts(existing, range));
+    }
+    compatible = pruneRedundantRanges(next);
+    if (compatible.length === 0) return null;
+  }
+  return compatible.join(' || ');
 }
 
 async function main() {
@@ -235,6 +382,28 @@ async function main() {
     }
   }
 
+  const compatibleRange = intersectRanges(byRange.keys());
+  if (compatibleRange) {
+    console.log('\nCompatible Node range across deps:', compatibleRange);
+    const rootPkg = await readJsonSafe(path.join(root, 'package.json'));
+    const declaredRootRange = rootPkg?.engines?.node;
+    if (
+      declaredRootRange &&
+      semver.validRange(declaredRootRange) &&
+      !isSubsetOf(declaredRootRange, compatibleRange)
+    ) {
+      console.log(
+        '\nCurrent root engines.node is broader than the installed dependency constraints:',
+      );
+      console.log(`  declared:   ${declaredRootRange}`);
+      console.log(`  compatible: ${compatibleRange}`);
+    }
+  } else if (byRange.size) {
+    console.log(
+      '\nNo compatible Node range satisfies all dependency engines.node constraints.',
+    );
+  }
+
   if (invalid.size) {
     console.log('\nInvalid engine ranges:');
     for (const [rng, set] of invalid.entries()) {
@@ -246,13 +415,13 @@ async function main() {
 
   // Write engines.node to workspace packages + root if requested
   if (setEnginesFlag) {
-    if (!floor) {
-      console.log('\nCannot set engines.node: no computed floor from audit.');
+    if (!compatibleRange) {
+      console.log('\nCannot set engines.node: no compatible range from audit.');
       return;
     }
-    const setEnginesValue = `>=${floor.version}`;
+    const setEnginesValue = compatibleRange;
     console.log(
-      `\nApplying computed floor to engines.node: ${setEnginesValue}`,
+      `\nApplying compatible range to engines.node: ${setEnginesValue}`,
     );
     const targets = [path.join(root, 'package.json'), ...workspacePkgs];
     let changed = 0;

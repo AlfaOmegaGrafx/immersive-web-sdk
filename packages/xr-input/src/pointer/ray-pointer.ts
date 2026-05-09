@@ -86,10 +86,11 @@ export class RayPointer {
         uniforms: {
           endValue: { value: 0.75 },
           color: { value: new Color().copy(rayDefaultColor) },
-          opacity: { value: 1 },
+          opacity: { value: 0 },
         },
       }),
     );
+    this.ray.visible = false;
     this.ray.renderOrder = 0;
     xrOrigin.raySpaces[handedness].add(this.ray);
   }

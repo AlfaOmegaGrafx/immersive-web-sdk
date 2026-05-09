@@ -54,7 +54,7 @@
   },
   "homepage": "https://github.com/facebook/immersive-web-sdk#readme",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
