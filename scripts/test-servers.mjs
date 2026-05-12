@@ -37,18 +37,17 @@ if (!command || !['start', 'ports', 'stop'].includes(command)) {
 }
 
 /**
- * Read .mcp.json for a given example dir and extract the port.
- * Returns the port number or null if not found.
+ * Read the IWSDK runtime session for a given example dir and extract the port.
+ * Returns the port number when the runtime is connected and command-ready, else null.
  */
 function readPort(dir) {
-  const mcpPath = join(EXAMPLES, dir, '.mcp.json');
-  if (!existsSync(mcpPath)) return null;
+  const sessionPath = join(EXAMPLES, dir, '.iwsdk', 'runtime', 'session.json');
+  if (!existsSync(sessionPath)) return null;
   try {
-    const data = JSON.parse(readFileSync(mcpPath, 'utf8'));
-    const server = Object.values(data.mcpServers)[0];
-    const args = server.args;
-    const portIdx = args.indexOf('--port');
-    return portIdx >= 0 ? parseInt(args[portIdx + 1], 10) : null;
+    const data = JSON.parse(readFileSync(sessionPath, 'utf8'));
+    if (!data?.port) return null;
+    if (data.browser && data.browser.commandReady !== true) return null;
+    return parseInt(data.port, 10);
   } catch {
     return null;
   }
@@ -77,10 +76,16 @@ if (command === 'ports') {
 }
 
 if (command === 'start') {
-  // Remove existing .mcp.json files
+  // Remove stale runtime session files so we only consider freshly registered servers.
   for (const dir of ALL_DIRS) {
-    const mcpPath = join(EXAMPLES, dir, '.mcp.json');
-    if (existsSync(mcpPath)) unlinkSync(mcpPath);
+    const sessionPath = join(
+      EXAMPLES,
+      dir,
+      '.iwsdk',
+      'runtime',
+      'session.json',
+    );
+    if (existsSync(sessionPath)) unlinkSync(sessionPath);
   }
 
   // Start all servers
