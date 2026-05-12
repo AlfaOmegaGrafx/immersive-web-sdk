@@ -241,7 +241,15 @@ function nowIso(): string {
 function downloadWithCurl(sourceUrl: string, destination: string): void {
   const result = spawnSync(
     'curl',
-    ['-L', '--fail', '--silent', '--show-error', sourceUrl, '--output', destination],
+    [
+      '-L',
+      '--fail',
+      '--silent',
+      '--show-error',
+      sourceUrl,
+      '--output',
+      destination,
+    ],
     {
       encoding: 'utf8',
     },
@@ -786,10 +794,7 @@ async function fetchManifest(
         }
         parsedManifest = (await response.json()) as ReferenceAssetsManifest;
       } catch (error) {
-        if (
-          error instanceof Error &&
-          error.message.startsWith('HTTP ')
-        ) {
+        if (error instanceof Error && error.message.startsWith('HTTP ')) {
           throw error;
         }
         parsedManifest = fetchJsonWithCurl(
@@ -904,10 +909,7 @@ async function downloadArchive(
           onEvent,
         );
       } catch (error) {
-        if (
-          error instanceof Error &&
-          error.message.startsWith('HTTP ')
-        ) {
+        if (error instanceof Error && error.message.startsWith('HTTP ')) {
           throw error;
         }
         await rm(destination, { force: true });
@@ -1108,7 +1110,9 @@ async function installPinnedModelFiles(
   }
 
   if (!(await validateModelDir(extractedDir))) {
-    throw new Error('Pinned reference model files are incomplete after download.');
+    throw new Error(
+      'Pinned reference model files are incomplete after download.',
+    );
   }
 
   await createDeterministicModelArchive(extractedDir, archivePath);

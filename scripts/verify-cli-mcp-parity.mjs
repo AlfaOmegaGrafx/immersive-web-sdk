@@ -1,5 +1,12 @@
 #!/usr/bin/env node --no-warnings
 /**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
  * Live CLI vs MCP parity harness for the runtime-first surface.
  *
  * Usage:
@@ -398,10 +405,7 @@ async function waitForBrowserCommandReady(
         timeoutMs: Math.min(remainingMs, 3000),
         runtimeSession: session,
       });
-      if (
-        isRecord(response.result) &&
-        response.result.commandReady === true
-      ) {
+      if (isRecord(response.result) && response.result.commandReady === true) {
         return;
       }
     } catch (error) {

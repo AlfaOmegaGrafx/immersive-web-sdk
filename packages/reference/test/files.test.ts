@@ -90,7 +90,7 @@ async function seedReadyCache() {
     `${JSON.stringify(
       {
         version: packageVersion,
-          model: testModel,
+        model: testModel,
         dimensions: 768,
         iwsdk: [],
         deps: [],

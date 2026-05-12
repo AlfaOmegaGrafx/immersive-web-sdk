@@ -177,12 +177,15 @@ export async function setRuntimeSessionBrowserState(
 export async function unregisterRuntimeSession(
   workspaceRoot: string,
 ): Promise<void> {
-  await enqueueSessionMutation(workspaceRoot, async (normalizedWorkspaceRoot) => {
-    traceRuntimeSession('unregister', {
-      workspaceRoot: normalizedWorkspaceRoot,
-    });
-    await rm(getRuntimeSessionFilePath(normalizedWorkspaceRoot), {
-      force: true,
-    }).catch(() => {});
-  });
+  await enqueueSessionMutation(
+    workspaceRoot,
+    async (normalizedWorkspaceRoot) => {
+      traceRuntimeSession('unregister', {
+        workspaceRoot: normalizedWorkspaceRoot,
+      });
+      await rm(getRuntimeSessionFilePath(normalizedWorkspaceRoot), {
+        force: true,
+      }).catch(() => {});
+    },
+  );
 }

@@ -167,14 +167,12 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
 
       // Closure-scoped state for browser auto-recovery
       let browserLaunchPromise: Promise<void> | null = null;
-      let browserCommandReadyPromise:
-        | Promise<{
-            browser: ManagedBrowser | null;
-            relaunched: boolean;
-            bridgeConnected: boolean;
-            waitedForBridgeMs: number;
-          }>
-        | null = null;
+      let browserCommandReadyPromise: Promise<{
+        browser: ManagedBrowser | null;
+        relaunched: boolean;
+        bridgeConnected: boolean;
+        waitedForBridgeMs: number;
+      }> | null = null;
       let browserRuntimeClients: Set<WebSocket> | null = null;
       let serverShuttingDown = false;
       let browserUrl = '';
@@ -250,18 +248,17 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
           commandReady,
           connectedClientCount,
           lastTransitionAt: new Date().toISOString(),
-          ...(options.lastBridgeConnectedAt ?? previous?.lastBridgeConnectedAt
+          ...((options.lastBridgeConnectedAt ?? previous?.lastBridgeConnectedAt)
             ? {
                 lastBridgeConnectedAt:
                   options.lastBridgeConnectedAt ??
                   previous?.lastBridgeConnectedAt,
               }
             : {}),
-          ...(options.lastCommandReadyAt ?? previous?.lastCommandReadyAt
+          ...((options.lastCommandReadyAt ?? previous?.lastCommandReadyAt)
             ? {
                 lastCommandReadyAt:
-                  options.lastCommandReadyAt ??
-                  previous?.lastCommandReadyAt,
+                  options.lastCommandReadyAt ?? previous?.lastCommandReadyAt,
               }
             : {}),
           ...(options.lastError ? { lastError: options.lastError } : {}),
@@ -699,8 +696,9 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
                 requestId: parsed.id,
               });
               try {
-                const readiness =
-                  await ensureBrowserCommandReady('internal_browser_probe');
+                const readiness = await ensureBrowserCommandReady(
+                  'internal_browser_probe',
+                );
                 if (!readiness.browser || !readiness.bridgeConnected) {
                   sendUnavailableBrowser(ws, parsed.id, 'probe_unavailable');
                 } else {
@@ -721,13 +719,20 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
               return;
             }
 
-            if (parsed.method === 'get_console_logs' && typeof parsed.id === 'string') {
+            if (
+              parsed.method === 'get_console_logs' &&
+              typeof parsed.id === 'string'
+            ) {
               intercepted = true;
               try {
                 const readiness =
                   await ensureBrowserCommandReady('get_console_logs');
                 if (!readiness.browser || !readiness.bridgeConnected) {
-                  sendUnavailableBrowser(ws, parsed.id, 'console_logs_unavailable');
+                  sendUnavailableBrowser(
+                    ws,
+                    parsed.id,
+                    'console_logs_unavailable',
+                  );
                   return;
                 }
                 if (readiness.relaunched) {
@@ -773,12 +778,19 @@ export function iwsdkDev(options: DevPluginOptions = {}): Plugin {
               return;
             }
 
-            if (parsed.method === 'screenshot' && typeof parsed.id === 'string') {
+            if (
+              parsed.method === 'screenshot' &&
+              typeof parsed.id === 'string'
+            ) {
               intercepted = true;
               try {
                 const readiness = await ensureBrowserCommandReady('screenshot');
                 if (!readiness.browser || !readiness.bridgeConnected) {
-                  sendUnavailableBrowser(ws, parsed.id, 'screenshot_unavailable');
+                  sendUnavailableBrowser(
+                    ws,
+                    parsed.id,
+                    'screenshot_unavailable',
+                  );
                   return;
                 }
                 if (readiness.relaunched) {

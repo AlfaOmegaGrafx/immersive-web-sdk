@@ -128,11 +128,7 @@ function printReferenceWarmupGuidance() {
       '  # warmup still needs access to the baked public model file URLs unless the shared cache is already pre-warmed',
     ),
   );
-  console.log(
-    stdoutColor.gray(
-      '  # then run: npx iwsdk reference warmup',
-    ),
-  );
+  console.log(stdoutColor.gray('  # then run: npx iwsdk reference warmup'));
 }
 
 export function printNextSteps(

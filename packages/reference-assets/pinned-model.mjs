@@ -7,7 +7,12 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream, existsSync, readFileSync } from 'node:fs';
+import {
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  readFileSync,
+} from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import * as tar from 'tar';
@@ -15,7 +20,10 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const referencePackageRoot = path.resolve(__dirname, '..', 'reference', 'src');
-const modelContractPath = path.join(referencePackageRoot, 'model-contract.json');
+const modelContractPath = path.join(
+  referencePackageRoot,
+  'model-contract.json',
+);
 const contract = JSON.parse(readFileSync(modelContractPath, 'utf8'));
 const REFERENCE_MODEL_ONNX_PATH = 'onnx/model_quantized.onnx';
 
@@ -43,7 +51,10 @@ export const REQUIRED_MODEL_FILES = Object.freeze(
   REFERENCE_MODEL_FILE_SOURCES.map((file) => file.relativePath),
 );
 
-export function buildReferenceEmbeddingModelMetadata(archiveSha256, archiveSize) {
+export function buildReferenceEmbeddingModelMetadata(
+  archiveSha256,
+  archiveSize,
+) {
   return {
     ...DEFAULT_REFERENCE_MODEL_SETTINGS,
     archiveSha256,
@@ -130,7 +141,15 @@ export async function downloadPinnedModelFile(
     await fsp.rm(destination, { force: true }).catch(() => {});
     const curlResult = spawnSync(
       'curl',
-      ['-L', '--fail', '--silent', '--show-error', sourceUrl, '--output', destination],
+      [
+        '-L',
+        '--fail',
+        '--silent',
+        '--show-error',
+        sourceUrl,
+        '--output',
+        destination,
+      ],
       {
         encoding: 'utf8',
       },

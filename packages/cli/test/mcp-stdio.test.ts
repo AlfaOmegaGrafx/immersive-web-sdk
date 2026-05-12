@@ -256,7 +256,9 @@ describe('mcp stdio interface shaping', () => {
       });
       expect(reloaded.isError).not.toBe(true);
       expect(reloaded.content[0]?.type).toBe('text');
-      expect(reloaded.content[0]?.text).toContain('Active browser tab reloaded');
+      expect(reloaded.content[0]?.text).toContain(
+        'Active browser tab reloaded',
+      );
       expect(JSON.parse(reloaded.content[1]?.text ?? '')).toMatchObject({
         reloaded: true,
         _tab: { id: 'tab-1', generation: 2 },

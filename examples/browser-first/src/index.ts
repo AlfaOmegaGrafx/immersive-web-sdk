@@ -1,3 +1,10 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
 import {
   AssetManager,
   AssetManifest,
@@ -6,7 +13,6 @@ import {
   AudioUtils,
   BoxGeometry,
   Color,
-
   EnvironmentType,
   Grabbed,
   Hovered,
@@ -92,7 +98,9 @@ class BrowserFirstFeedbackSystem extends createSystem({
         .getElementById('toggle-view-button')
         ?.addEventListener('click', () => {
           (
-            this.world.getSystem(BrowserMouseLookSystem) as BrowserMouseLookSystem
+            this.world.getSystem(
+              BrowserMouseLookSystem,
+            ) as BrowserMouseLookSystem
           )?.toggleMode();
         });
     });
@@ -100,8 +108,9 @@ class BrowserFirstFeedbackSystem extends createSystem({
 
   update(): void {
     this.queries.rayTargets.entities.forEach((entity) => {
-      const material = (entity.object3D as Mesh | undefined)
-        ?.material as MeshStandardMaterial | undefined;
+      const material = (entity.object3D as Mesh | undefined)?.material as
+        | MeshStandardMaterial
+        | undefined;
       if (!material?.color) {
         return;
       }
@@ -116,8 +125,9 @@ class BrowserFirstFeedbackSystem extends createSystem({
     });
 
     this.queries.oneHandGrabTargets.entities.forEach((entity) => {
-      const material = (entity.object3D as Mesh | undefined)
-        ?.material as MeshStandardMaterial | undefined;
+      const material = (entity.object3D as Mesh | undefined)?.material as
+        | MeshStandardMaterial
+        | undefined;
       if (!material?.color) {
         return;
       }
@@ -200,9 +210,7 @@ function createBeepUrl(): string {
   const sampleCount = Math.floor(sampleRate * durationSeconds);
   const wavHeaderBytes = 44;
   const bytesPerSample = 2;
-  const buffer = new ArrayBuffer(
-    wavHeaderBytes + sampleCount * bytesPerSample,
-  );
+  const buffer = new ArrayBuffer(wavHeaderBytes + sampleCount * bytesPerSample);
   const view = new DataView(buffer);
 
   writeAscii(view, 0, 'RIFF');

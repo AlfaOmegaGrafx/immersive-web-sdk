@@ -282,9 +282,7 @@ export class BundleSource implements ResolvedSource {
  * - `true` (bare --canary)  → BundleSource with DEFAULT_BUNDLE_URL
  * - `string`                → BundleSource with the provided URL
  */
-export function resolveSource(
-  canaryFlag?: string | boolean,
-): ResolvedSource {
+export function resolveSource(canaryFlag?: string | boolean): ResolvedSource {
   if (!canaryFlag) {
     return new NpmSource();
   }

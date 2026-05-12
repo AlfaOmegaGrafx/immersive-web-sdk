@@ -130,8 +130,12 @@ let installPromise: Promise<void> | null = null;
  * On install failure the flag stays unset so the next retry can try again.
  */
 async function ensureChromiumInstalled(): Promise<void> {
-  if (chromiumInstalled) {return;}
-  if (installPromise) {return installPromise;}
+  if (chromiumInstalled) {
+    return;
+  }
+  if (installPromise) {
+    return installPromise;
+  }
 
   const execPath = chromium.executablePath();
   if (fs.existsSync(execPath)) {
@@ -189,7 +193,9 @@ async function doChromiumInstall(): Promise<void> {
  * bare-metal environments without requiring external tools.
  */
 function hasGpuDevice(): boolean {
-  if (os.platform() !== 'linux') {return true;}
+  if (os.platform() !== 'linux') {
+    return true;
+  }
   try {
     const entries = fs.readdirSync('/dev/dri');
     return entries.some((e) => e.startsWith('renderD') || e.startsWith('card'));
@@ -227,27 +233,52 @@ function resolveGpuBackend(): GpuBackend {
   }
 
   if (envOverride === 'swiftshader') {
-    return { kind: 'swiftshader', useGl: 'angle', useAngle: 'swiftshader', reason: 'env-override' };
+    return {
+      kind: 'swiftshader',
+      useGl: 'angle',
+      useAngle: 'swiftshader',
+      reason: 'env-override',
+    };
   }
 
   const platform = os.platform();
   if (platform === 'darwin') {
-    return { kind: 'hardware', useGl: 'angle', useAngle: 'metal', reason: 'auto' };
+    return {
+      kind: 'hardware',
+      useGl: 'angle',
+      useAngle: 'metal',
+      reason: 'auto',
+    };
   }
   if (platform === 'win32') {
-    return { kind: 'hardware', useGl: 'angle', useAngle: 'd3d11', reason: 'auto' };
+    return {
+      kind: 'hardware',
+      useGl: 'angle',
+      useAngle: 'd3d11',
+      reason: 'auto',
+    };
   }
 
   // Linux: honour explicit "gpu" override, otherwise auto-detect
   if (envOverride === 'gpu') {
-    return { kind: 'hardware', useGl: 'angle', useAngle: 'gl', reason: 'env-override' };
+    return {
+      kind: 'hardware',
+      useGl: 'angle',
+      useAngle: 'gl',
+      reason: 'env-override',
+    };
   }
 
   if (hasGpuDevice()) {
     return { kind: 'hardware', useGl: 'angle', useAngle: 'gl', reason: 'auto' };
   }
 
-  return { kind: 'swiftshader', useGl: 'angle', useAngle: 'swiftshader', reason: 'auto' };
+  return {
+    kind: 'swiftshader',
+    useGl: 'angle',
+    useAngle: 'swiftshader',
+    reason: 'auto',
+  };
 }
 
 export async function launchManagedBrowser(

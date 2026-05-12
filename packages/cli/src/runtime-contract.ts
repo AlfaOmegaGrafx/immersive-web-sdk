@@ -129,7 +129,10 @@ export interface WorkspaceRuntimeState {
   launch: LaunchMetadata | null;
 }
 
-type RuntimeBrowserStatusSession = Pick<RuntimeSession, 'schemaVersion' | 'browser'>;
+type RuntimeBrowserStatusSession = Pick<
+  RuntimeSession,
+  'schemaVersion' | 'browser'
+>;
 
 export function hasRuntimeBrowserCommandReadyContract(
   session: RuntimeBrowserStatusSession | null | undefined,

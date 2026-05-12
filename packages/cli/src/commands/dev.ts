@@ -35,7 +35,10 @@ import {
   resolveWorkspaceRoot,
   setLaunchMetadata,
 } from '../runtime-state.js';
-import { RuntimeCommandExecutionError, sendRuntimeCommand } from '../runtime-transport.js';
+import {
+  RuntimeCommandExecutionError,
+  sendRuntimeCommand,
+} from '../runtime-transport.js';
 import { readAdapterStatus } from './adapter.js';
 import { handleStatus } from './status.js';
 
@@ -68,7 +71,9 @@ function traceDev(event: string, details: Record<string, unknown> = {}): void {
   if (!isTraceEnabled()) {
     return;
   }
-  console.error(`[IWSDK-RUNTIME-TRACE][dev] ${event} ${JSON.stringify(details)}`);
+  console.error(
+    `[IWSDK-RUNTIME-TRACE][dev] ${event} ${JSON.stringify(details)}`,
+  );
 }
 
 function isBrowserProbeResult(
@@ -80,7 +85,8 @@ function isBrowserProbeResult(
     !Array.isArray(value) &&
     typeof (value as RuntimeBrowserProbeResult).bridgeConnected === 'boolean' &&
     typeof (value as RuntimeBrowserProbeResult).commandReady === 'boolean' &&
-    typeof (value as RuntimeBrowserProbeResult).waitedForBridgeMs === 'number' &&
+    typeof (value as RuntimeBrowserProbeResult).waitedForBridgeMs ===
+      'number' &&
     typeof (value as RuntimeBrowserProbeResult).browser === 'object'
   );
 }
@@ -281,7 +287,9 @@ async function waitForRuntimeSession(
   return {
     session: lastSession,
     exit: null,
-    browserReady: Boolean(lastSession && isRuntimeBrowserCommandReady(lastSession)),
+    browserReady: Boolean(
+      lastSession && isRuntimeBrowserCommandReady(lastSession),
+    ),
     browserIssue:
       lastBrowserIssue ??
       (lastSession?.browser

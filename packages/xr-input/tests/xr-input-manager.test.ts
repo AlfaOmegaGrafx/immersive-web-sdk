@@ -5,7 +5,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   Mesh,
   PerspectiveCamera,
@@ -13,8 +12,10 @@ import {
   ShaderMaterial,
   WebXRManager,
 } from 'three';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-type XRInputManagerConstructor = typeof import('../src/xr-input-manager.js').XRInputManager;
+type XRInputManagerConstructor =
+  typeof import('../src/xr-input-manager.js').XRInputManager;
 type XRInputManagerInstance = InstanceType<XRInputManagerConstructor>;
 
 let XRInputManager: XRInputManagerConstructor;
@@ -91,7 +92,9 @@ function getCursorMeshes(manager: XRInputManagerInstance): Mesh[] {
 }
 
 function getOnlyMesh(children: Array<unknown>): Mesh {
-  const meshes = children.filter((child): child is Mesh => child instanceof Mesh);
+  const meshes = children.filter(
+    (child): child is Mesh => child instanceof Mesh,
+  );
   expect(meshes).toHaveLength(1);
   return meshes[0];
 }

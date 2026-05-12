@@ -65,9 +65,7 @@ export class SearchService {
         readFileSync(embeddingsPath, 'utf-8'),
       ) as EmbeddingsData;
       if (!isReferenceEmbeddingModelMetadata(data.model)) {
-        throw new Error(
-          'Embeddings file is missing pinned model metadata.',
-        );
+        throw new Error('Embeddings file is missing pinned model metadata.');
       }
       model = data.model;
 

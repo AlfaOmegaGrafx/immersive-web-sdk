@@ -14,9 +14,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 
-export function getReferencePayloadBuildInputs({
-  root = packageRoot,
-} = {}) {
+export function getReferencePayloadBuildInputs({ root = packageRoot } = {}) {
   const resolvedRoot = path.resolve(root);
   const embeddingsPath = path.join(resolvedRoot, 'data', 'embeddings.json');
   const hasEmbeddingsData = existsSync(embeddingsPath);

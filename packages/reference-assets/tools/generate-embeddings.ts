@@ -1,4 +1,11 @@
 /**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
  * Generate embeddings from parsed chunks using the pinned reference model
  * files downloaded by the producer cache.
  *
@@ -168,9 +175,7 @@ async function generateEmbeddings(
   batchSize = 50,
 ): Promise<ChunkWithEmbedding[]> {
   const embedder = new ProducerEmbeddingService();
-  console.error(
-    '🔄 Initializing the pinned reference embedding model...',
-  );
+  console.error('🔄 Initializing the pinned reference embedding model...');
   await embedder.initialize();
   console.error('✅ Model initialized\n');
 

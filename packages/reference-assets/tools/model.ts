@@ -1,3 +1,10 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
 import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import {
@@ -179,7 +186,15 @@ async function downloadPinnedModelFile(
     await rm(destination, { force: true }).catch(() => {});
     const curlResult = spawnSync(
       'curl',
-      ['-L', '--fail', '--silent', '--show-error', sourceUrl, '--output', destination],
+      [
+        '-L',
+        '--fail',
+        '--silent',
+        '--show-error',
+        sourceUrl,
+        '--output',
+        destination,
+      ],
       {
         encoding: 'utf8',
       },
@@ -320,7 +335,9 @@ async function installReferenceModelFiles(
   }
 
   if (!hasReferenceEmbeddingModelFiles(extractedDir)) {
-    throw new Error('Pinned reference model files are incomplete after download.');
+    throw new Error(
+      'Pinned reference model files are incomplete after download.',
+    );
   }
 
   await mkdir(path.dirname(finalRoot), { recursive: true });
