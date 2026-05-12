@@ -8,12 +8,25 @@
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import {
+  Group,
   LoadingManager,
   REVISION,
   WebGLRenderer,
 } from '../../runtime/index.js';
 import { CacheManager } from '../cache-manager.js';
+
+/** Options for retrieving a cached GLTF. @category Assets */
+export interface GetGLTFOptions {
+  /**
+   * If true, return the cached GLTF directly (shared across calls).
+   * Default `false`: returns a fresh clone whose `scene`/`scenes` are new
+   * `Object3D` trees, allowing the same key to be used for multiple entities.
+   * Geometries, materials, and animation clips remain shared by reference.
+   */
+  shared?: boolean;
+}
 
 const THREE_PATH = `https://unpkg.com/three@0.${REVISION}.0`;
 
@@ -59,7 +72,14 @@ export class GLTFAssetLoader {
       .setKTX2Loader(this.ktx2Loader);
   }
 
-  /** Load a GLTF by URL, caching the result; optionally register a logical key. */
+  /**
+   * Load a GLTF by URL, caching the result; optionally register a logical key.
+   *
+   * @remarks
+   * Resolves with the cached `GLTF` instance directly. To retrieve a clone
+   * suitable for placing into multiple entities, call {@link GLTFAssetLoader.getGLTF}
+   * (or `AssetManager.getGLTF`) by key after the load resolves.
+   */
   static loadGLTF(url: string, key?: string): Promise<GLTF> {
     // Always use URL as cache key for consistent caching
     if (CacheManager.hasPromise(url)) {
@@ -96,8 +116,34 @@ export class GLTFAssetLoader {
     }
   }
 
-  /** Get a cached GLTF by logical key. */
-  static getGLTF(key: string): GLTF | null {
-    return (CacheManager.getAssetByKey(key) as GLTF) || null;
+  /**
+   * Get a cached GLTF by logical key.
+   *
+   * @remarks
+   * By default, returns a fresh clone: `scene` and `scenes` are new
+   * `Object3D` trees (correctly handling `SkinnedMesh`/`Bone` hierarchies),
+   * while geometries, materials, `animations`, `cameras`, `asset`,
+   * `parser`, and `userData` remain shared by reference. This makes it
+   * safe to call `getGLTF(key)` once per entity — adding the result's
+   * `scene` to multiple parents will not silently re-parent a single
+   * shared object.
+   *
+   * Pass `{ shared: true }` to return the cached `GLTF` directly (the
+   * pre-0.4.x behavior), e.g. for framework code that intentionally
+   * mutates the canonical instance.
+   */
+  static getGLTF(key: string, options: GetGLTFOptions = {}): GLTF | null {
+    const cached = CacheManager.getAssetByKey(key) as GLTF | undefined;
+    if (!cached) {
+      return null;
+    }
+    if (options.shared) {
+      return cached;
+    }
+    return {
+      ...cached,
+      scene: cloneSkinned(cached.scene) as Group,
+      scenes: cached.scenes.map((s) => cloneSkinned(s) as Group),
+    };
   }
 }

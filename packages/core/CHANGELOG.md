@@ -1,5 +1,18 @@
 # @iwsdk/core
 
+## Unreleased
+
+### Behavior Changes
+
+- `AssetManager.getGLTF(key)` (and `GLTFAssetLoader.getGLTF(key)`) now
+  return a fresh clone of the cached `GLTF` by default. `scene` and
+  `scenes` are cloned via `SkeletonUtils.clone` (correct for
+  `SkinnedMesh`/`Bone` hierarchies); geometries, materials, and
+  `animations` remain shared by reference. This fixes silent re-parenting
+  when the same key is used to spawn multiple entities (T270858760).
+  Pass `{ shared: true }` to opt back into the previous shared-instance
+  behavior.
+
 ## 0.4.0
 
 ### Minor Changes

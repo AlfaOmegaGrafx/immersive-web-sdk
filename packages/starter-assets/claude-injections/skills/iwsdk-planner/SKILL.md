@@ -564,6 +564,9 @@ const world = await World.create(container, {
 
 // Access preloaded assets
 const model = AssetManager.getGLTF('myModel');
+// `getGLTF` returns a fresh clone of `scene`/`scenes` per call, so the
+// same key safely backs multiple entities. Use `{ shared: true }` for
+// the cached instance.
 const texture = AssetManager.getTexture('myTexture');
 const audio = AssetManager.getAudio('mySound');
 ```
@@ -1253,6 +1256,9 @@ const world = await World.create(container, {
 
 // Retrieve preloaded assets (synchronous — already loaded)
 const gltf = AssetManager.getGLTF('myModel');
+// `getGLTF` returns a fresh clone of `scene`/`scenes` per call, so the
+// same key safely backs multiple entities. Pass `{ shared: true }` to
+// get the cached instance.
 const texture = AssetManager.getTexture('myTexture');
 const audio = AssetManager.getAudio('mySound');
 ```

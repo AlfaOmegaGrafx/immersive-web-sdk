@@ -192,6 +192,9 @@ const world = await World.create(container, {
   assets: { myModel: { url: '/models/scene.glb', type: AssetType.GLTF } },
 });
 const gltf = AssetManager.getGLTF('myModel');
+// `getGLTF` returns a fresh clone of `scene`/`scenes` per call, so it's
+// safe to use the same key for multiple entities. Pass `{ shared: true }`
+// if you intentionally want the cached instance.
 
 // ✅ GOOD - For runtime loading
 await AssetManager.loadGLTF(url, 'myModel');

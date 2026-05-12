@@ -37,7 +37,7 @@ export class RaycastPlantSystem extends createSystem({
       return;
     }
 
-    this.previewPlant = plantGltf.scene.clone();
+    this.previewPlant = plantGltf.scene;
     this.scene.add(this.previewPlant);
 
     // Create an entity with EnvironmentRaycastTarget to track raycast hits
@@ -75,7 +75,7 @@ export class RaycastPlantSystem extends createSystem({
       return;
     }
 
-    const newPlant = plantGltf.scene.clone();
+    const newPlant = plantGltf.scene;
     newPlant.position.copy(position);
     newPlant.quaternion.copy(quaternion);
 

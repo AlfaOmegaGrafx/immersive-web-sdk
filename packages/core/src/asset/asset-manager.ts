@@ -10,9 +10,11 @@ import type { World } from '../ecs/index.js';
 import { LoadingManager, Texture, WebGLRenderer } from '../runtime/index.js';
 import { CacheManager } from './cache-manager.js';
 import { AudioAssetLoader } from './loaders/audio-loader.js';
-import { GLTFAssetLoader } from './loaders/gltf-loader.js';
+import { GetGLTFOptions, GLTFAssetLoader } from './loaders/gltf-loader.js';
 import { HDRTextureAssetLoader } from './loaders/hdr-texture-loader.js';
 import { TextureAssetLoader } from './loaders/texture-loader.js';
+
+export type { GetGLTFOptions } from './loaders/gltf-loader.js';
 
 /**
  * Asset types supported by the {@link AssetManager}.
@@ -120,7 +122,14 @@ export class AssetManager {
     }
   }
 
-  /** Load a GLTF by URL; optionally register a logical key. */
+  /**
+   * Load a GLTF by URL; optionally register a logical key.
+   *
+   * @remarks
+   * Resolves with the cached `GLTF` directly. Use {@link AssetManager.getGLTF}
+   * after the load resolves to retrieve a clone suitable for placing into
+   * multiple entities.
+   */
   static loadGLTF(url: string, key?: string): Promise<GLTF> {
     return GLTFAssetLoader.loadGLTF(url, key);
   }
@@ -173,8 +182,16 @@ export class AssetManager {
     return HDRTextureAssetLoader.loadHDRTexture(url);
   }
 
-  /** Get a cached GLTF by logical key. */
-  static getGLTF(key: string): GLTF | null {
-    return GLTFAssetLoader.getGLTF(key);
+  /**
+   * Get a cached GLTF by logical key.
+   *
+   * @remarks
+   * Returns a fresh clone by default (`scene`/`scenes` are new `Object3D`
+   * trees; geometries, materials, animations stay shared), so the same key
+   * may be safely used for multiple entities. Pass `{ shared: true }` to
+   * return the cached instance directly.
+   */
+  static getGLTF(key: string, options?: GetGLTFOptions): GLTF | null {
+    return GLTFAssetLoader.getGLTF(key, options);
   }
 }
