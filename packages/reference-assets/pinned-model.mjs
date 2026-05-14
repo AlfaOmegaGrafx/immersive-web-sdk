@@ -54,11 +54,13 @@ export const REQUIRED_MODEL_FILES = Object.freeze(
 export function buildReferenceEmbeddingModelMetadata(
   archiveSha256,
   archiveSize,
+  fileHashes,
 ) {
   return {
     ...DEFAULT_REFERENCE_MODEL_SETTINGS,
     archiveSha256,
     archiveSize,
+    ...(fileHashes ? { fileHashes } : {}),
   };
 }
 
@@ -84,6 +86,16 @@ export async function sha256File(filePath) {
     stream.on('error', reject);
     stream.on('end', () => resolve(hash.digest('hex')));
   });
+}
+
+export async function computeModelFileHashes(modelDir) {
+  const hashes = {};
+  for (const file of REFERENCE_MODEL_FILE_SOURCES) {
+    hashes[file.relativePath] = await sha256File(
+      path.join(modelDir, file.relativePath),
+    );
+  }
+  return hashes;
 }
 
 async function writeResponseToFile(response, destination, sourceUrl) {

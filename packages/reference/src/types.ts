@@ -78,6 +78,7 @@ export interface ReferenceEmbeddingModelMetadata {
   format: 'transformers-js';
   archiveSha256: string;
   archiveSize: number;
+  fileHashes?: Record<string, string>;
   dtype: ReferenceEmbeddingModelDType;
   pooling: string;
   normalize: boolean;
@@ -106,27 +107,40 @@ export interface RelationshipQuery {
 export function isReferenceEmbeddingModelMetadata(
   value: unknown,
 ): value is ReferenceEmbeddingModelMetadata {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'source' in value &&
-    value.source === 'archive' &&
-    'format' in value &&
-    value.format === 'transformers-js' &&
-    'archiveSha256' in value &&
-    typeof value.archiveSha256 === 'string' &&
-    value.archiveSha256.length > 0 &&
-    'archiveSize' in value &&
-    typeof value.archiveSize === 'number' &&
-    Number.isFinite(value.archiveSize) &&
-    value.archiveSize > 0 &&
-    'dtype' in value &&
-    typeof value.dtype === 'string' &&
-    value.dtype.length > 0 &&
-    'pooling' in value &&
-    typeof value.pooling === 'string' &&
-    value.pooling.length > 0 &&
-    'normalize' in value &&
-    typeof value.normalize === 'boolean'
-  );
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('source' in value) ||
+    value.source !== 'archive' ||
+    !('format' in value) ||
+    value.format !== 'transformers-js' ||
+    !('archiveSha256' in value) ||
+    typeof value.archiveSha256 !== 'string' ||
+    value.archiveSha256.length === 0 ||
+    !('archiveSize' in value) ||
+    typeof value.archiveSize !== 'number' ||
+    !Number.isFinite(value.archiveSize) ||
+    value.archiveSize <= 0 ||
+    !('dtype' in value) ||
+    typeof value.dtype !== 'string' ||
+    value.dtype.length === 0 ||
+    !('pooling' in value) ||
+    typeof value.pooling !== 'string' ||
+    value.pooling.length === 0 ||
+    !('normalize' in value) ||
+    typeof value.normalize !== 'boolean'
+  ) {
+    return false;
+  }
+
+  if ('fileHashes' in value && value.fileHashes != null) {
+    if (
+      typeof value.fileHashes !== 'object' ||
+      Array.isArray(value.fileHashes)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }

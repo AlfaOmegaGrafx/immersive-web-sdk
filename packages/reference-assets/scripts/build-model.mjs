@@ -10,6 +10,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  computeModelFileHashes,
   createDeterministicModelArchive,
   downloadPinnedModelFile,
   REFERENCE_MODEL_FILE_SOURCES,
@@ -70,6 +71,7 @@ async function main() {
 
     const archiveStat = await fsp.stat(archivePath);
     const archiveSha256 = await sha256File(archivePath);
+    const fileHashes = await computeModelFileHashes(sourceDir);
     const manifest = {
       schemaVersion: 1,
       referenceVersion: packageJson.version,
@@ -80,6 +82,7 @@ async function main() {
         size: archiveStat.size,
         format: 'transformers-js',
         requiredFiles: REQUIRED_MODEL_FILES,
+        fileHashes,
       },
     };
 

@@ -57,11 +57,13 @@ export const DEFAULT_REFERENCE_MODEL_SETTINGS = Object.freeze({
 export function buildReferenceEmbeddingModelMetadata(
   archiveSha256: string,
   archiveSize: number,
+  fileHashes?: Record<string, string>,
 ): ReferenceEmbeddingModelMetadata {
   return {
     ...DEFAULT_REFERENCE_MODEL_SETTINGS,
     archiveSha256,
     archiveSize,
+    ...(fileHashes ? { fileHashes } : {}),
   };
 }
 

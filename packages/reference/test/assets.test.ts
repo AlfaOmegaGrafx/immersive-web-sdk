@@ -115,11 +115,18 @@ beforeEach(async () => {
   process.env.IWSDK_REFERENCE_CACHE_DIR = sharedRoot;
   process.env.IWSDK_REFERENCE_ASSETS_BASE_URL = 'https://cdn.example.test';
   const modelArchive = await createArchive('model', MODEL_FILES);
+  const fileHashes: Record<string, string> = {};
+  for (const [relativePath, contents] of Object.entries(MODEL_FILES)) {
+    fileHashes[relativePath] = createHash('sha256')
+      .update(contents, 'utf8')
+      .digest('hex');
+  }
   testModel = {
     source: 'archive',
     format: 'transformers-js',
     archiveSha256: modelArchive.sha256,
     archiveSize: modelArchive.size,
+    fileHashes,
     dtype: 'q8',
     pooling: 'mean',
     normalize: true,
@@ -569,6 +576,59 @@ describe('reference cache status', () => {
     await expect(warmupReferenceAssets()).rejects.toThrow(
       REFERENCE_MODEL_ONNX_URL,
     );
+  });
+
+  it('detects corrupted model files via per-file hashes', async () => {
+    const packageVersion = getReferencePackageVersion();
+    const dataDir = path.join(sharedRoot, 'corpora', 'data-hash', 'data');
+    const modelDir = await seedModelDir();
+    await mkdir(path.join(dataDir, 'sources'), { recursive: true });
+    await writeFile(
+      path.join(dataDir, 'embeddings.json'),
+      `${JSON.stringify(
+        {
+          version: packageVersion,
+          model: testModel,
+          dimensions: 768,
+          iwsdk: [],
+          deps: [],
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    await writeFile(
+      path.join(modelDir, 'config.json'),
+      '{"corrupt":true}\n',
+      'utf8',
+    );
+
+    await writeStateFile({
+      schemaVersion: 4,
+      packageVersion,
+      assetsPackage: {
+        name: ASSETS_PACKAGE_NAME,
+        version: packageVersion,
+      },
+      status: 'ready',
+      pid: null,
+      manifestUrl: 'https://cdn.example.test/manifest.json',
+      dataDir,
+      dataSha256: 'data-hash',
+      modelDir,
+      modelSha256: testModel.archiveSha256,
+      modelUrl: REFERENCE_MODEL_ONNX_URL,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      error: null,
+    });
+
+    const status = await getReferenceCacheStatus();
+    expect(status.initState).toBe('failed');
+    expect(status.error?.message).toContain('corrupted');
   });
 
   it('reports a mismatch when the warmed model does not match the corpus metadata', async () => {

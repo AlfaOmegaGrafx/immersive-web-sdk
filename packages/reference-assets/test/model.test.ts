@@ -21,10 +21,15 @@ import {
 let tempDir: string;
 let sharedRoot: string;
 
-async function createModelArchive(): Promise<{ sha256: string; size: number }> {
+async function createModelArchive(): Promise<{
+  sha256: string;
+  size: number;
+  fileHashes: Record<string, string>;
+}> {
   const sourceRoot = path.join(tempDir, 'model-source');
   const archivePath = path.join(tempDir, 'model.tgz');
   const archiveRoot = path.join(sourceRoot, 'model');
+  const fileHashes: Record<string, string> = {};
 
   await rm(sourceRoot, { recursive: true, force: true });
   await mkdir(archiveRoot, { recursive: true });
@@ -40,6 +45,7 @@ async function createModelArchive(): Promise<{ sha256: string; size: number }> {
     const destination = path.join(archiveRoot, relativePath);
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, body);
+    fileHashes[relativePath] = createHash('sha256').update(body).digest('hex');
   }
 
   await tar.c(
@@ -58,6 +64,7 @@ async function createModelArchive(): Promise<{ sha256: string; size: number }> {
   return {
     sha256: createHash('sha256').update(buffer).digest('hex'),
     size: buffer.length,
+    fileHashes,
   };
 }
 const ONNX_BUFFER = Buffer.from('fake-onnx');
@@ -124,6 +131,7 @@ describe('reference model installer', () => {
       pooling: 'mean',
       normalize: true,
     });
+    expect(installed.metadata.fileHashes).toEqual(expectedArchive.fileHashes);
     expect(formatReferenceEmbeddingModel(installed.metadata)).toBe(
       `sha256:${expectedArchive.sha256}`,
     );

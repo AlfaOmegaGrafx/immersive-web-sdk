@@ -35,6 +35,7 @@ export interface ReferenceEmbeddingModelMetadata {
   format: 'transformers-js';
   archiveSha256: string;
   archiveSize: number;
+  fileHashes?: Record<string, string>;
   dtype: ReferenceEmbeddingModelDType;
   pooling: 'mean';
   normalize: true;
@@ -88,11 +89,13 @@ const REQUIRED_MODEL_FILES = Object.freeze(
 function buildReferenceEmbeddingModelMetadata(
   archiveSha256: string,
   archiveSize: number,
+  fileHashes?: Record<string, string>,
 ): ReferenceEmbeddingModelMetadata {
   return {
     ...DEFAULT_REFERENCE_MODEL_SETTINGS,
     archiveSha256,
     archiveSize,
+    ...(fileHashes ? { fileHashes } : {}),
   };
 }
 
@@ -246,27 +249,44 @@ async function createDeterministicModelArchive(
   );
 }
 
-async function readInstalledModelMetadata(
+async function computeModelFileHashes(
   modelDir: string,
-  stagingRoot = getReferenceModelStagingRoot(),
-): Promise<ReferenceEmbeddingModelMetadata> {
-  const archivePath = path.join(
-    stagingRoot,
-    'verification',
-    `model-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tgz`,
-  );
-  await mkdir(path.dirname(archivePath), { recursive: true });
-
-  try {
-    await createDeterministicModelArchive(modelDir, archivePath);
-    const archiveStat = await stat(archivePath);
-    return buildReferenceEmbeddingModelMetadata(
-      await sha256File(archivePath),
-      archiveStat.size,
+): Promise<Record<string, string>> {
+  const hashes: Record<string, string> = {};
+  for (const file of REFERENCE_MODEL_FILE_SOURCES) {
+    hashes[file.relativePath] = await sha256File(
+      path.join(modelDir, file.relativePath),
     );
-  } finally {
-    await rm(archivePath, { force: true }).catch(() => {});
   }
+  return hashes;
+}
+
+async function validateInstalledModelFiles(
+  modelDir: string,
+  expectedFileHashes: Record<string, string> | undefined,
+): Promise<boolean> {
+  if (!hasReferenceEmbeddingModelFiles(modelDir)) {
+    return false;
+  }
+
+  if (!expectedFileHashes) {
+    return true;
+  }
+
+  for (const [relativePath, expectedSha] of Object.entries(
+    expectedFileHashes,
+  )) {
+    try {
+      const actualSha = await sha256File(path.join(modelDir, relativePath));
+      if (actualSha !== expectedSha) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export interface InstalledReferenceEmbeddingModel {
@@ -323,16 +343,10 @@ async function installReferenceModelFiles(
     metadata.archiveSha256,
   );
   const finalDir = path.join(finalRoot, 'model');
-  if (hasReferenceEmbeddingModelFiles(finalDir)) {
-    const installedMetadata = await readInstalledModelMetadata(finalDir);
-    if (
-      installedMetadata.archiveSha256 === metadata.archiveSha256 &&
-      installedMetadata.archiveSize === metadata.archiveSize
-    ) {
-      return finalDir;
-    }
-    await rm(finalRoot, { recursive: true, force: true });
+  if (await validateInstalledModelFiles(finalDir, metadata.fileHashes)) {
+    return finalDir;
   }
+  await rm(finalRoot, { recursive: true, force: true });
 
   if (!hasReferenceEmbeddingModelFiles(extractedDir)) {
     throw new Error(
@@ -349,13 +363,8 @@ async function installReferenceModelFiles(
     await rename(tempFinalRoot, finalRoot);
   } catch (error) {
     await rm(tempFinalRoot, { recursive: true, force: true });
-    if (!hasReferenceEmbeddingModelFiles(finalDir)) {
-      throw error;
-    }
-    const installedMetadata = await readInstalledModelMetadata(finalDir);
     if (
-      installedMetadata.archiveSha256 !== metadata.archiveSha256 ||
-      installedMetadata.archiveSize !== metadata.archiveSize
+      !(await validateInstalledModelFiles(finalDir, metadata.fileHashes))
     ) {
       throw error;
     }
@@ -382,11 +391,14 @@ export async function installReferenceEmbeddingModel(): Promise<InstalledReferen
       await downloadPinnedModelFile(file.sourceUrl, destination);
     }
 
+    const fileHashes = await computeModelFileHashes(extractedDir);
+
     await createDeterministicModelArchive(extractedDir, archivePath);
     const archiveStat = await stat(archivePath);
     const metadata = buildReferenceEmbeddingModelMetadata(
       await sha256File(archivePath),
       archiveStat.size,
+      fileHashes,
     );
     const modelDir = await installReferenceModelFiles(
       metadata,
