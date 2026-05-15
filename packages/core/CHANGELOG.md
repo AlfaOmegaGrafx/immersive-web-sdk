@@ -12,6 +12,13 @@
   when the same key is used to spawn multiple entities (T270858760).
   Pass `{ shared: true }` to opt back into the previous shared-instance
   behavior.
+- `world.camera` is now auto-restored to its pre-XR local transform and
+  projection on session exit (deferred one `requestAnimationFrame` so
+  three.js's `WebXRManager` finishes tearing down on the end-tick first).
+  Previously the camera was left at the last head pose and the 2D
+  fallback view was inside-the-head until the app re-applied a camera
+  setup. Opt out via `xr: { restoreCameraOnExit: false }` if your app
+  manages this transition itself.
 
 ## 0.4.0
 

@@ -77,6 +77,7 @@ import {
   ColorScheme,
 } from '../ui/index.js';
 import { Visibility, VisibilitySystem } from '../visibility/index.js';
+import { attachBrowserCameraRestore } from './browser-camera.js';
 import { attachCameraToPlayer } from './player-camera.js';
 import {
   ReferenceSpaceType,
@@ -221,6 +222,7 @@ export function initializeWorld(
     sessionMode: config.xr.sessionMode,
     referenceSpace: config.xr.referenceSpace,
     features: config.xr.features,
+    restoreCameraOnExit: config.xr.restoreCameraOnExit,
   };
 
   // Register core systems (LevelSystem receives defaultLighting)
@@ -309,6 +311,7 @@ function extractConfiguration(options: WorldOptions) {
         xrOptions?.referenceSpace ?? ReferenceSpaceType.LocalFloor,
       features: xrOptions?.features,
       offer: options.xr === false ? 'none' : (xrOptions?.offer ?? 'always'),
+      restoreCameraOnExit: xrOptions?.restoreCameraOnExit ?? true,
     },
     input: {
       canvasPointerEvents,
@@ -522,6 +525,9 @@ function manageOfferFlow(world: World, mode: 'once' | 'always') {
         world.renderer.xr.setReferenceSpaceType(
           resolvedType as unknown as XRReferenceSpaceType,
         );
+        if (opts.restoreCameraOnExit !== false) {
+          attachBrowserCameraRestore(world.camera, session);
+        }
         await world.renderer.xr.setSession(session);
         world.session = session;
       } catch (err) {

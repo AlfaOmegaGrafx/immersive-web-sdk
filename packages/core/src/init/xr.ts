@@ -6,6 +6,7 @@
  */
 
 import type { World } from '../ecs/index.js';
+import { attachBrowserCameraRestore } from './browser-camera.js';
 
 /** WebXR session modes supported by IWSDK. @category Runtime */
 export enum SessionMode {
@@ -82,6 +83,16 @@ export type XROptions = {
   referenceSpace?: ReferenceSpaceSpec;
   /** Structured feature flags; avoids raw string arrays. */
   features?: XRFeatureOptions;
+  /**
+   * Auto-restore `world.camera` to its pre-XR local transform and
+   * projection when the session ends. Without this, `WebGLRenderer.xr`
+   * leaves the camera at the last head pose and the 2D fallback view is
+   * inside-the-head until the user re-applies a camera setup. Restore is
+   * deferred one rAF so `WebXRManager` finishes tearing down on the
+   * end-tick before the camera is overwritten.
+   * @defaultValue true
+   */
+  restoreCameraOnExit?: boolean;
 };
 
 /** Default optional features appended to requests/offers. */
@@ -216,6 +227,7 @@ function mergeXROptions(
     sessionMode: o.sessionMode ?? b.sessionMode ?? SessionMode.ImmersiveVR,
     referenceSpace: o.referenceSpace ?? b.referenceSpace,
     features: Object.keys(mergedFeatures).length ? mergedFeatures : undefined,
+    restoreCameraOnExit: o.restoreCameraOnExit ?? b.restoreCameraOnExit ?? true,
   };
   return merged;
 }
@@ -275,6 +287,9 @@ export function launchXR(world: World, options?: Partial<XROptions>) {
       world.renderer.xr.setReferenceSpaceType(
         resolvedType as unknown as XRReferenceSpaceType,
       );
+      if (merged.restoreCameraOnExit !== false) {
+        attachBrowserCameraRestore(world.camera, session);
+      }
       await world.renderer.xr.setSession(session);
       world.session = session;
     } catch (err) {

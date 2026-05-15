@@ -189,6 +189,9 @@ Session Start:
 Session End:
 ├─ World.visibilityState → 'non-immersive'
 ├─ Input systems pause expensive tracking
+├─ `world.camera` auto-restored to its pre-XR local transform/projection
+│  (one rAF after WebXRManager teardown; opt out with
+│  `xr: { restoreCameraOnExit: false }`)
 └─ Render loop returns to 60fps
 ```
 
