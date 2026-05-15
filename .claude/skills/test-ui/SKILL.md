@@ -8,77 +8,17 @@ argument-hint: '[--suite panel|screenspace|follower|all]'
 
 Run 5 test suites covering panel loading, ScreenSpace, system registration, component registration, and stability.
 
-All tool calls go through `npx iwsdk` from the example workspace. The helper below keeps the existing MCP-style tool names, but it resolves them through `iwsdk mcp inspect` and then executes the matching CLI command directly.
-
 **Configuration:**
 
-- EXAMPLE_DIR: /Users/felixz/Projects/immersive-web-sdk/examples/poke
-- ROOT: /Users/felixz/Projects/immersive-web-sdk
+- EXAMPLE_DIR: `$IWSDK_REPO_ROOT/examples/poke`
 
-**SHORTHAND**: Throughout this document, `MCPCALL` means this shell function:
+**Tool calls**: every tool call is `npx iwsdk <subcommand> [--input-json '<JSON>'] [--timeout <ms>]`, run from inside the example workspace (cwd `$EXAMPLE_DIR`). The CLI auto-discovers the IWSDK app root from cwd, so no path tricks are required. Run `npx iwsdk mcp inspect` from the example to discover available tools and their CLI subcommands.
 
-```bash
-MCPCALL() {
-  local tool=""
-  local args=""
-  local timeout=""
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --tool) tool="$2"; shift 2 ;;
-      --args) args="$2"; shift 2 ;;
-      --timeout) timeout="$2"; shift 2 ;;
-      *) echo "Unknown argument: $1" >&2; return 1 ;;
-    esac
-  done
+- `<JSON>` is a JSON object string. Omit `--input-json` if no arguments are needed.
+- Output is JSON on stdout: `{ok, workspaceRoot, operation, result}`. Parse it to check assertions.
+- Use `--timeout 20000` for operations that may take longer (reload, xr enter, screenshot).
 
-  node --input-type=module - "$tool" "${args:-}" "${timeout:-}" <<'EOF'
-import { spawnSync } from 'node:child_process';
-
-const [toolName, rawArgs, timeout] = process.argv.slice(2);
-const inspect = spawnSync('npx', ['iwsdk', 'mcp', 'inspect'], {
-  cwd: process.cwd(),
-  encoding: 'utf8',
-});
-if (inspect.status !== 0) {
-  if (inspect.stderr) process.stderr.write(inspect.stderr);
-  process.exit(inspect.status ?? 1);
-}
-
-const parsed = JSON.parse(inspect.stdout);
-const tool = parsed.data.tools.find((entry) => entry.mcpName === toolName);
-if (!tool) {
-  console.error(`Unknown tool: ${toolName}`);
-  process.exit(1);
-}
-
-const cliArgs = ['iwsdk', ...tool.cliPath.split(' ')];
-if (rawArgs) cliArgs.push('--input-json', rawArgs);
-if (timeout) cliArgs.push('--timeout', timeout);
-
-const result = spawnSync('npx', cliArgs, {
-  cwd: process.cwd(),
-  encoding: 'utf8',
-});
-if (result.stdout) process.stdout.write(result.stdout);
-if (result.stderr) process.stderr.write(result.stderr);
-process.exit(result.status ?? 1);
-EOF
-}
-```
-
-**Tool calling pattern**: Every tool call is a Bash command using the MCPCALL shorthand:
-
-```
-MCPCALL --tool <TOOL_NAME> --args '<JSON_ARGS>' 2>/dev/null
-```
-
-- `<TOOL_NAME>` uses MCP-style names (e.g. `browser_reload_page`, `xr_accept_session`). The shell helper resolves them to direct CLI commands.
-- `<JSON_ARGS>` is a JSON object string. Omit `--args` if no arguments needed.
-- Output is JSON on stdout. Parse it to check assertions.
-- Use `--timeout 20000` for operations that may take longer (reload, accept_session, screenshot).
-- Running from the example workspace (or a child directory within it) is required so `npx iwsdk` can resolve the nearest IWSDK app root.
-
-**IMPORTANT**: Run each Bash command one at a time. Parse the JSON output and verify assertions before moving to the next command. Do NOT chain multiple `MCPCALL` commands together.
+**IMPORTANT**: Run each Bash command one at a time. Parse the JSON output and verify assertions before moving to the next command. Do NOT chain multiple CLI commands together.
 
 **IMPORTANT**: When the instructions say "wait N seconds", use `sleep N` as a separate Bash command.
 
@@ -87,7 +27,7 @@ MCPCALL --tool <TOOL_NAME> --args '<JSON_ARGS>' 2>/dev/null
 ## Step 1: Install Dependencies
 
 ```bash
-cd /Users/felixz/Projects/immersive-web-sdk/examples/poke && npm run fresh:install
+cd $IWSDK_REPO_ROOT/examples/poke && npm run fresh:install
 ```
 
 Wait for this to complete before proceeding.
@@ -99,12 +39,12 @@ Wait for this to complete before proceeding.
 Start the dev server as a background task using the Bash tool's `run_in_background: true` parameter:
 
 ```bash
-cd /Users/felixz/Projects/immersive-web-sdk/examples/poke && npm run dev
+cd $IWSDK_REPO_ROOT/examples/poke && npm run dev
 ```
 
 **IMPORTANT**: This command MUST be run with `run_in_background: true` on the Bash tool — do NOT append `&` to the command itself.
 
-Once the background task is launched, poll the output for Vite's ready message (up to 60s). You can also run `npx iwsdk dev status` from the example directory until `state.running` becomes `true`. You do not need to extract or manage the port yourself; all subsequent `MCPCALL` commands resolve the active runtime through the CLI.
+Once the background task is launched, poll the output for Vite's ready message (up to 60s). You can also run `npx iwsdk dev status` from the example directory until `state.running` becomes `true`. You do not need to extract or manage the port yourself; subsequent commands resolve the active runtime through the CLI automatically.
 
 If the server fails to start within 60 seconds, report FAIL for all suites and skip to Step 5.
 
@@ -113,7 +53,7 @@ If the server fails to start within 60 seconds, report FAIL for all suites and s
 ## Step 3: Verify Connectivity
 
 ```bash
-MCPCALL --tool ecs_list_systems 2>/dev/null
+npx iwsdk ecs systems 2>/dev/null
 ```
 
 This must return JSON with a list of systems. If it fails:
@@ -130,13 +70,13 @@ This must return JSON with a list of systems. If it fails:
 
 Run these commands in order:
 
-1. `MCPCALL --tool browser_reload_page --timeout 20000 2>/dev/null`
+1. `npx iwsdk browser reload --timeout 20000 2>/dev/null`
    Then: `sleep 3`
 
-2. `MCPCALL --tool xr_accept_session --timeout 20000 2>/dev/null`
+2. `npx iwsdk xr enter --timeout 20000 2>/dev/null`
    Then: `sleep 2`
 
-3. `MCPCALL --tool browser_get_console_logs --args '{"count":20,"level":["error","warn"]}' 2>/dev/null`
+3. `npx iwsdk browser logs --input-json '{"count":20,"level":["error","warn"]}' 2>/dev/null`
    Assert: No error-level logs.
 
 ---
@@ -146,7 +86,7 @@ Run these commands in order:
 **Test 1.1: Find Panel Entity**
 
 ```bash
-MCPCALL --tool ecs_find_entities --args '{"withComponents":["PanelUI"]}' 2>/dev/null
+npx iwsdk ecs find --input-json '{"withComponents":["PanelUI"]}' 2>/dev/null
 ```
 
 Assert: At least 1 entity. Save its `entityIndex` as `<panel>`.
@@ -154,7 +94,7 @@ Assert: At least 1 entity. Save its `entityIndex` as `<panel>`.
 **Test 1.2: PanelDocument Added After Load**
 
 ```bash
-MCPCALL --tool ecs_query_entity --args '{"entityIndex":<panel>,"components":["PanelUI","PanelDocument"]}' 2>/dev/null
+npx iwsdk ecs query --input-json '{"entityIndex":<panel>,"components":["PanelUI","PanelDocument"]}' 2>/dev/null
 ```
 
 Assert:
@@ -168,7 +108,7 @@ Assert:
 **Test 1.3: PanelUISystem Query Counts**
 
 ```bash
-MCPCALL --tool ecs_list_systems 2>/dev/null
+npx iwsdk ecs systems 2>/dev/null
 ```
 
 Assert:
@@ -183,7 +123,7 @@ Assert:
 **Test 2.1: ScreenSpace Values**
 
 ```bash
-MCPCALL --tool ecs_query_entity --args '{"entityIndex":<panel>,"components":["ScreenSpace"]}' 2>/dev/null
+npx iwsdk ecs query --input-json '{"entityIndex":<panel>,"components":["ScreenSpace"]}' 2>/dev/null
 ```
 
 Assert:
@@ -199,7 +139,7 @@ Assert:
 **Test 2.2: Panel Visible in Screenshot**
 
 ```bash
-MCPCALL --tool browser_screenshot --timeout 20000 2>/dev/null
+npx iwsdk browser screenshot --timeout 20000 2>/dev/null
 ```
 
 Assert: Returns a `screenshotPath` (PNG file saved to /tmp).
@@ -207,7 +147,7 @@ Assert: Returns a `screenshotPath` (PNG file saved to /tmp).
 **Test 2.3: ScreenSpaceUISystem Active**
 
 ```bash
-MCPCALL --tool ecs_list_systems 2>/dev/null
+npx iwsdk ecs systems 2>/dev/null
 ```
 
 Assert: ScreenSpaceUISystem: `panels: 1`
@@ -217,12 +157,12 @@ Assert: ScreenSpaceUISystem: `panels: 1`
 ### Suite 3: System Registration
 
 ```bash
-MCPCALL --tool ecs_list_systems 2>/dev/null
+npx iwsdk ecs systems 2>/dev/null
 ```
 
 Assert:
 
-- `PanelUISystem` at priority 0, config: forwardHtmlEvents, kits, preferredColorScheme
+- `PanelUISystem` at priority 0, config: kits, preferredColorScheme
 - `ScreenSpaceUISystem` at priority 0
 - `FollowSystem` at priority 0
 
@@ -231,7 +171,7 @@ Assert:
 ### Suite 4: Component Registration
 
 ```bash
-MCPCALL --tool ecs_list_components 2>/dev/null
+npx iwsdk ecs components 2>/dev/null
 ```
 
 Assert:
@@ -245,7 +185,7 @@ Assert:
 ### Suite 5: Stability
 
 ```bash
-MCPCALL --tool browser_get_console_logs --args '{"count":30,"level":["error","warn"]}' 2>/dev/null
+npx iwsdk browser logs --input-json '{"count":30,"level":["error","warn"]}' 2>/dev/null
 ```
 
 Assert: No application-level errors or warnings. Pre-existing 404 resource errors from page load are acceptable.
@@ -257,7 +197,7 @@ Assert: No application-level errors or warnings. Pre-existing 404 resource error
 Kill the dev server:
 
 ```bash
-cd /Users/felixz/Projects/immersive-web-sdk/examples/poke && npx iwsdk dev down
+cd $IWSDK_REPO_ROOT/examples/poke && npx iwsdk dev down
 ```
 
 Output a summary table:
@@ -280,7 +220,7 @@ If any suite fails, include which assertion failed and actual vs expected values
 
 If at any point a transient error occurs (server crash, WebSocket timeout, connection refused, etc.) that is NOT caused by a source code bug:
 
-1. Stop the dev server: `cd /Users/felixz/Projects/immersive-web-sdk/examples/poke && npx iwsdk dev down`
+1. Stop the dev server: `cd $IWSDK_REPO_ROOT/examples/poke && npx iwsdk dev down`
 2. Restart: re-run Step 2 to start a fresh dev server
 3. Re-run the Pre-test Setup (reload, accept session)
 4. Retry the failed suite
@@ -305,4 +245,4 @@ The panel entity also has `RayInteractable` + `PokeInteractable`, so it particip
 
 ### Entity indices change on reload
 
-Never cache entity indices across page reloads. Always re-discover via `ecs_find_entities`.
+Never cache entity indices across page reloads. Always re-discover via `npx iwsdk ecs find`.
