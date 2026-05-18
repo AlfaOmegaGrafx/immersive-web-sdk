@@ -742,6 +742,8 @@ function registerFeatureSystems(
       .registerComponent(ScreenSpace)
       .registerComponent(Follower)
       .registerSystem(PanelUISystem, {
+        // Keep UIKit document updates ahead of screen-space layout publishing.
+        priority: -3.8,
         configData: {
           ...(kitsObj ? { kits: kitsObj } : {}),
           ...(preferredColorScheme !== undefined
@@ -749,7 +751,11 @@ function registerFeatureSystems(
             : {}),
         },
       })
-      .registerSystem(ScreenSpaceUISystem)
+      .registerSystem(ScreenSpaceUISystem, {
+        // Publish camera-local UI descendants after PanelUISystem updates
+        // documents and before CanvasPointerSystem forwards DOM pointer events.
+        priority: -3.75,
+      })
       .registerSystem(FollowSystem);
   }
 }

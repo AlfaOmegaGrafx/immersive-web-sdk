@@ -11,7 +11,9 @@ import {
   setPreferredColorScheme,
 } from '@pmndrs/uikit';
 import { interpret } from '@pmndrs/uikitml';
-import { Types, createComponent, Entity, createSystem } from '../ecs/index.js';
+import { Types, createComponent } from '../ecs/component.js';
+import type { Entity } from '../ecs/entity.js';
+import { createSystem } from '../ecs/system.js';
 import { Vector3 } from '../runtime/three.js';
 import { UIKitDocument } from './document.js';
 

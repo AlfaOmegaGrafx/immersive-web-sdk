@@ -5,7 +5,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Types, createComponent, Entity, createSystem } from '../ecs/index.js';
+import { Types, createComponent } from '../ecs/component.js';
+import type { Entity } from '../ecs/entity.js';
+import { createSystem } from '../ecs/system.js';
+import type { Object3D } from '../runtime/index.js';
+import type { ScenePointerDescendants } from '../runtime/scene-pointer-descendants.js';
 import { MathUtils } from '../runtime/three.js';
 import { UIKitDocument } from './document.js';
 import { PanelUI, PanelDocument } from './ui.js';
@@ -72,6 +76,7 @@ export const ScreenSpace = createComponent(
 export class ScreenSpaceUISystem extends createSystem({
   panels: { required: [PanelUI, PanelDocument, ScreenSpace] },
 }) {
+  private screenSpaceDescendants: Object3D[] = [];
   private layoutHelpers = {
     dimensionContainer: document.createElement('div'),
     positionContainer: document.createElement('div'),
@@ -103,6 +108,8 @@ export class ScreenSpaceUISystem extends createSystem({
 
   /** Move panels between world and screen space and recompute layout on changes. */
   update(): void {
+    this.screenSpaceDescendants.length = 0;
+
     this.queries.panels.entities.forEach((entity) => {
       const parent = entity.object3D;
       const document = PanelDocument.data.document[entity.index] as
@@ -129,7 +136,17 @@ export class ScreenSpaceUISystem extends createSystem({
         this.calculateLayout(entity);
         this.resized = false;
       }
+
+      if (document.parent === this.camera) {
+        this.screenSpaceDescendants.push(document);
+      }
     });
+
+    const scene = this.scene as typeof this.scene & ScenePointerDescendants;
+    scene.screenSpaceDescendants =
+      this.screenSpaceDescendants.length > 0
+        ? this.screenSpaceDescendants
+        : undefined;
   }
 
   /** Compute pixel size/position and apply camera‑relative transform. */
@@ -244,5 +261,13 @@ export class ScreenSpaceUISystem extends createSystem({
     };
     document.body.removeChild(container);
     return result;
+  }
+
+  destroy(): void {
+    super.destroy();
+    (
+      this.scene as typeof this.scene & ScenePointerDescendants
+    ).screenSpaceDescendants = undefined;
+    this.screenSpaceDescendants.length = 0;
   }
 }
