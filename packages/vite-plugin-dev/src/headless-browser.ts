@@ -373,7 +373,7 @@ export async function launchManagedBrowser(
     (window as any).__IWSDK_MCP_TRACE = traceEnabled;
   }, traceMcp);
 
-  await page.goto(url, { waitUntil: 'networkidle' });
+  await page.goto(url, { waitUntil: 'commit' });
 
   // Wait for IWER to inject and XR device to be available
   await page.waitForFunction(() => (window as any).IWER_DEVICE !== undefined, {
