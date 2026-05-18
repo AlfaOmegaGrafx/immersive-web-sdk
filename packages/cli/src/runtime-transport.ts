@@ -173,7 +173,7 @@ async function trySendRuntimeCommand(
 ): Promise<RuntimeCommandResponse> {
   return new Promise<RuntimeCommandResponse>((resolve, reject) => {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const wsUrl = `${protocol}://localhost:${port}/__iwer_mcp`;
+    const wsUrl = `${protocol}://127.0.0.1:${port}/__iwer_mcp`;
     const ws = new WebSocket(wsUrl, {
       rejectUnauthorized: false,
     });
