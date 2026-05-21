@@ -1,5 +1,13 @@
 # @iwsdk/starter-assets
 
+## 0.4.1
+
+### Patch Changes
+
+- Add the `iwsdk-depth-occlusion` skill to generated starter agent guidance.
+- Update starter `PROJECT_AGENTS.md`, `PROJECT_CLAUDE.md`, and planner guidance for the latest AI workflow.
+- Rebuild starter recipes and assets for the 0.4.1 release.
+
 ## 0.4.0
 
 ### Minor Changes

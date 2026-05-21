@@ -1,24 +1,18 @@
 # @iwsdk/core
 
-## Unreleased
+## 0.4.1
 
-### Behavior Changes
+### Patch Changes
 
-- `AssetManager.getGLTF(key)` (and `GLTFAssetLoader.getGLTF(key)`) now
-  return a fresh clone of the cached `GLTF` by default. `scene` and
-  `scenes` are cloned via `SkeletonUtils.clone` (correct for
-  `SkinnedMesh`/`Bone` hierarchies); geometries, materials, and
-  `animations` remain shared by reference. This fixes silent re-parenting
-  when the same key is used to spawn multiple entities (T270858760).
-  Pass `{ shared: true }` to opt back into the previous shared-instance
-  behavior.
-- `world.camera` is now auto-restored to its pre-XR local transform and
-  projection on session exit (deferred one `requestAnimationFrame` so
-  three.js's `WebXRManager` finishes tearing down on the end-tick first).
-  Previously the camera was left at the last head pose and the 2D
-  fallback view was inside-the-head until the app re-applied a camera
-  setup. Opt out via `xr: { restoreCameraOnExit: false }` if your app
-  manages this transition itself.
+- `AssetManager.getGLTF(key)` and `GLTFAssetLoader.getGLTF(key)` now return a fresh clone of the cached GLTF by default, preventing silent re-parenting when spawning multiple entities from the same asset. Pass `{ shared: true }` to opt back into the previous shared-instance behavior.
+- Restore `world.camera` to its pre-XR local transform and projection after XR session exit, avoiding a broken browser fallback view after leaving immersive mode. Opt out with `xr: { restoreCameraOnExit: false }`.
+- Route canvas pointer events correctly to screen-space `PanelUI`, including descendant hit handling.
+- Add regression tests for GLTF cloning, browser camera restore, canvas pointer routing, and screen-space UI descendants.
+
+- Updated dependencies
+  - @iwsdk/glxf@0.4.1
+  - @iwsdk/locomotor@0.4.1
+  - @iwsdk/xr-input@0.4.1
 
 ## 0.4.0
 

@@ -1,5 +1,12 @@
 # @iwsdk/vite-plugin-dev
 
+## 0.4.1
+
+### Patch Changes
+
+- Use `waitUntil: 'commit'` for managed-browser navigation, reducing startup flake before the browser runtime bridge becomes ready.
+- Tighten managed-browser session state updates for relaunch/readiness handling.
+
 ## 0.4.0
 
 ### Minor Changes

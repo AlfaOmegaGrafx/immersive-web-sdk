@@ -1,5 +1,12 @@
 # @iwsdk/cli
 
+## 0.4.1
+
+### Patch Changes
+
+- Connect runtime WebSocket traffic to `127.0.0.1` instead of `localhost`, avoiding local DNS/IPv6 resolution issues when talking to the dev server.
+- Tighten dev-server browser readiness/status handling used by CLI and MCP probes.
+
 ## 0.4.0
 
 ### Minor Changes

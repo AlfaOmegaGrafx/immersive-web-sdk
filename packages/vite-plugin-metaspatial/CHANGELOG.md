@@ -1,5 +1,11 @@
 # @iwsdk/vite-plugin-metaspatial
 
+## 0.4.1
+
+### Patch Changes
+
+- Version-only release to keep the `@iwsdk/*` package set aligned for 0.4.1.
+
 ## 0.4.0
 
 ### Minor Changes

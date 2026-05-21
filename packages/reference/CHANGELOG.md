@@ -1,5 +1,12 @@
 # @iwsdk/reference
 
+## 0.4.1
+
+### Patch Changes
+
+- Validate warmed reference model caches with pinned per-file hashes instead of recreating nondeterministic archives.
+- Add reference warmup/cache validation coverage for the updated model metadata contract.
+
 ## 0.4.0
 
 ### Minor Changes

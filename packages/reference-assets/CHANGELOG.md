@@ -1,5 +1,12 @@
 # @iwsdk/reference-assets
 
+## 0.4.1
+
+### Patch Changes
+
+- Add pinned per-file hashes to reference model metadata so warmup/cache validation no longer depends on recompressing model archives.
+- Rebuild the reference payload/model artifacts for the 0.4.1 release.
+
 ## 0.4.0
 
 ### Minor Changes
