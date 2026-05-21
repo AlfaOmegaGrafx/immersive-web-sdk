@@ -1,0 +1,716 @@
+---
+name: iwsdk-dev
+description: >
+  MUST read this skill BEFORE developing VR/MR/browser-first 3D applications
+  using IWSDK (Immersive Web SDK). Covers project scaffolding, headless
+  browser setup, CLI tools, reference system, ECS debugging, XR emulation,
+  verification workflows, deployment, and known issues.
+---
+
+# IWSDK Development Guide
+
+**Current version: 0.4.1** · [iwsdk.dev](https://iwsdk.dev) · [GitHub](https://github.com/facebook/immersive-web-sdk)
+
+This guide is for AI agents and developers building WebXR or browser-first 3D
+applications with IWSDK in cloud/headless Linux environments (no physical GPU,
+no display server). It assumes Node.js satisfies IWSDK's package engine range:
+`>=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0`.
+The managed dev browser uses Playwright Chromium; the dev plugin installs the
+matching Chromium binary when it is missing.
+
+### CLI-First Operating Model
+
+This guide is intentionally **CLI-first** for cloud-based harnesses. Treat
+`npx iwsdk ...` commands as the primary control surface for setup, runtime
+inspection, screenshots, ECS debugging, XR emulation, and reference queries.
+
+Reason: MCP adapter support in cloud harnesses is often missing, stale, or
+partially wired. Relying on MCP tool availability can degrade generation quality
+because the agent may plan around tools that are not actually connected. Use MCP
+tools only when the harness clearly exposes them and they are already working;
+otherwise use the CLI commands in this guide. Do not rewrite CLI examples into
+MCP-only workflows.
+
+---
+
+## 1. Project Scaffolding
+
+Always use the official `@iwsdk/create` package. Use `--yes` to bypass
+interactive prompts.
+
+**Do not hardcode scaffolding flags.** Infer the correct flags from the
+request. When ambiguous, ask.
+
+### Hard Constraints (Always Apply)
+
+- **`--no-metaspatial`** — use the manual workflow in cloud/headless Linux.
+  Meta Spatial Editor authoring requires the macOS/Windows GUI; the Linux CLI is
+  for CI/CD build workflows, not GUI authoring.
+
+### Step 1: XR vs Browser-First
+
+| Target | Flag | When to use |
+|--------|------|-------------|
+| **XR** | `--xr` (default) | VR or AR headset experiences. Proceed to Step 2. |
+| **Browser-first** | `--no-xr` | Desktop/mobile browser 3D app. No headset required. The scaffold sets `xr: false`, but `@iwsdk/create` does **not** currently wire browser locomotion, mouselook, or browser grabbing for you; add `features.locomotion: { browserControls: true }` and app-owned camera controls manually when needed. |
+
+### Step 2: XR Mode (XR only)
+
+| Mode | Flag | When to use |
+|------|------|-------------|
+| **VR** | `--mode vr` | Fully immersive virtual environment. |
+| **AR** | `--mode ar` | Augmented / mixed reality with passthrough. |
+
+### Step 3: Features
+
+| Feature | Flag | Enable when… | Disable when… |
+|---------|------|-------------|---------------|
+| **Physics** | `--physics` / `--no-physics` | Gravity, collisions, bouncing, throwing. | UI-only, data viz, grid-snapping board games. |
+| **Locomotion** | `--locomotion` / `--no-locomotion` | VR user moves through a large space (teleport/slide). For browser-first, configure `features.locomotion: { browserControls: true }` manually after scaffolding. | Stationary experience. |
+| **Grabbing** | `--grabbing` / `--no-grabbing` | XR users pick up, move, or manipulate objects. With `--no-xr`, the create flag is ignored; add browser interaction behavior manually. | Gaze/pointer-only or observational. |
+| **Scene Understanding** | `--scene-understanding` / `--no-scene-understanding` | AR: interact with real-world surfaces. | AR without surface interaction. |
+| **Environment Raycast** | `--environment-raycast` / `--no-environment-raycast` | AR: cast rays against real-world geometry. | No real-world hit testing needed. |
+
+### Step 4: Source (optional)
+
+| Flag | Effect |
+|------|--------|
+| *(none)* | Default npm source selected by the current `@iwsdk/create` package and starter-assets recipe. |
+| `--canary` | Baked-in CloudFront CDN canary bundle. |
+| `--canary <url>` | Custom bundle URL for internal builds. |
+
+### Examples
+
+```bash
+# VR game (stationary, physics for gameplay)
+npx @iwsdk/create@0.4.1 space-pong --yes --mode vr --physics --no-locomotion --grabbing --no-metaspatial
+
+# AR object placer
+npx @iwsdk/create@0.4.1 ar-placer --yes --mode ar --physics --scene-understanding --no-metaspatial
+
+# Browser-first 3D game (no headset). Add browser locomotion/camera controls in code.
+npx @iwsdk/create@0.4.1 browser-game --yes --no-xr --physics --no-metaspatial
+```
+
+---
+
+## 2. Headless Browser & SwiftShader
+
+### Auto-Detection (0.4.x)
+
+When `@iwsdk/vite-plugin-dev` launches its managed Playwright browser, it
+auto-detects GPU availability first:
+
+1. Probes `/dev/dri` for render nodes.
+2. Falls back to **SwiftShader** (Playwright Chromium's bundled software
+   renderer) when no GPU is found.
+3. Logs the selected backend every launch.
+
+**No manual patching required** in 0.4.x. Use the normal generated app workflow:
+`npm run dev` or `npx iwsdk dev up --open --foreground`.
+
+### Environment Variable Override
+
+```bash
+IWSDK_GPU=auto          # Default — auto-detect
+IWSDK_GPU=gpu           # Force hardware GPU
+IWSDK_GPU=swiftshader   # Force SwiftShader (software rendering)
+```
+
+### Legacy Notes
+
+Current 0.4.x apps should not patch `node_modules` or Chromium launch args. If
+an older 0.3.x harness carried a manual SwiftShader patch, treat that as
+historical migration context and remove it after upgrading to 0.4.x.
+
+### Playwright Browser Revision Recovery
+
+The vite plugin declares `playwright: ^1.58.2`; this repo lockfile currently
+resolves it to Playwright 1.58.2. If an environment has a mismatched Playwright
+browser cache, launch can fail with:
+
+```
+Executable doesn't exist at …/chromium_headless_shell-1208/…
+```
+
+**Preferred fixes:**
+
+1. **Install the matching Playwright browser revision:**
+   ```bash
+   npx playwright@1.58.2 install chromium
+   ```
+
+2. **Align the project Playwright version with the plugin's resolved version:**
+   ```bash
+   npm install playwright@1.58.2 --save-dev
+   npx playwright install chromium
+   ```
+
+Copying `~/.cache/ms-playwright` revision directories is an emergency cache
+workaround only; prefer reinstalling the matching browser revision.
+
+---
+
+## 3. Three.js Imports
+
+Standard Three.js classes are re-exported from `@iwsdk/core`. For app code,
+import standard Three classes from `@iwsdk/core` so they match IWSDK's
+Three/super-three build. Keep the template's `three` dependency/override; import
+`three/examples/jsm/...` only for addons that `@iwsdk/core` does not re-export.
+
+```typescript
+// ✅ CORRECT
+import {
+  Mesh, Group, BoxGeometry, SphereGeometry, CylinderGeometry,
+  PlaneGeometry, ConeGeometry, TorusGeometry,
+  MeshStandardMaterial, MeshBasicMaterial, LineBasicMaterial,
+  Color, Vector3, Quaternion, Euler, Matrix4,
+  Fog, AmbientLight, PointLight, DirectionalLight,
+  BufferGeometry, Float32BufferAttribute,
+  EdgesGeometry, LineSegments,
+  AdditiveBlending,
+  // ... every standard Three.js export is available
+} from "@iwsdk/core";
+
+// Avoid for standard Three classes in app code
+// import { Mesh } from "three";
+```
+
+---
+
+## 4. Key API Surface (0.4.x)
+
+### World Creation
+
+```typescript
+// XR world (default)
+const world = await World.create(container);
+
+// XR world with options
+const world = await World.create(container, {
+  xr: { offer: 'once' },  // or 'always' / 'none'; omit xr for the default
+  render: { near: 0.01, far: 200 },
+  features: {
+    grabbing: true,
+    locomotion: true,
+    physics: true,
+    spatialUI: false,
+  },
+});
+
+// Browser-first world (no XR)
+const world = await World.create(container, {
+  xr: false,
+  render: {
+    near: 0.001, far: 200,
+    camera: { position: [0, 1.6, 0], lookAt: [0, 1.55, -1] },
+  },
+  input: { canvasPointerEvents: true },
+  features: {
+    grabbing: true,
+    locomotion: { browserControls: true },  // WASD/arrows + Space + gamepad; app owns mouselook
+    physics: true,
+  },
+});
+```
+
+### Dual-Runtime Pattern (XR + Browser Fallback)
+
+For games that should work both in VR and in the browser:
+
+```typescript
+const world = await World.create(container, {
+  xr: { offer: 'once' },
+  input: { canvasPointerEvents: true },
+  features: {
+    grabbing: true,
+    locomotion: { browserControls: true },
+    physics: true,
+  },
+});
+```
+
+### Input System
+
+```typescript
+// InputManager facade (0.4.x)
+world.input.xr              // XRInputManager (controllers, hands)
+world.input.keyboard         // StatefulKeyboard
+world.input.actions          // InputActionManager
+world.input.browserGamepads  // Browser gamepad array
+
+// Action-backed input (preferred for reusable intent-based systems)
+world.input.actions.getAxis2D('locomotion.move');    // { x, y }
+world.input.actions.getButtonDown('locomotion.jump');
+
+// Built-in action names:
+//   locomotion.move, locomotion.turn, locomotion.jump,
+//   locomotion.teleportAim, locomotion.teleportCommit,
+//   interaction.select
+//
+// Some names are reserved for app/user bindings and are not default-bound.
+
+// Keyboard (browser-first)
+world.input.keyboard.getKeyPressed('KeyW');   // held this frame
+world.input.keyboard.getKeyDown('Space');     // pressed this frame
+world.input.keyboard.getKeyUp('KeyE');        // released this frame
+```
+
+### ECS-Native Player Rig
+
+```typescript
+world.playerEntity           // Entity wrapping XROrigin Group
+world.playerHeadEntity       // Entity for head space
+world.playerSpaceEntities    // { head, raySpaces, gripSpaces, indexTipSpaces }
+
+// Attach a HUD to the player's head
+const hud = world.createTransformEntity(hudMesh, {
+  parent: world.playerHeadEntity,
+  persistent: true,
+});
+```
+
+### Asset Management
+
+```typescript
+// getGLTF returns a fresh scene graph clone by default
+// (geometries, materials, and animations remain shared)
+const { scene } = AssetManager.getGLTF('myModel')!;
+world.scene.add(scene);
+
+// Opt into shared instance (old behavior)
+const { scene } = AssetManager.getGLTF('myModel', { shared: true })!;
+```
+
+---
+
+## 5. Dev Server
+
+```bash
+npm run dev                    # Generated apps: dev up --open --foreground
+npx iwsdk dev up               # Start dev:runtime through the CLI, usually backgrounded
+npx iwsdk dev up --foreground  # Stay attached to terminal
+npx iwsdk dev down           # Stop
+npx iwsdk dev restart        # Restart
+npx iwsdk dev status         # Check running state
+npx iwsdk dev logs           # View recorded background server logs
+npx iwsdk dev open           # Open in browser
+```
+
+Generated apps use `iwsdkDev({ ai: { mode: 'agent' } })`, which launches a
+managed headless Playwright Chromium, registers the MCP WebSocket endpoint, and
+records runtime state. Use `npx iwsdk dev status` for the resolved `localUrl`;
+the generated starter template defaults to `https://localhost:8081/`, but
+examples or existing apps may use another Vite port.
+
+### Node.js Requirement
+
+IWSDK 0.4.x requires Node.js satisfying:
+`>=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0`.
+If your environment ships an unsupported default (for example Node 18), install
+a supported Node version with your environment's version manager or platform
+package and prepend it to `PATH`.
+
+```bash
+node --version
+```
+
+---
+
+## 6. Adapter Management
+
+Project creation syncs MCP adapter configs after dependency installation for the
+selected AI tools. Sync or manage them explicitly with:
+
+```bash
+npx iwsdk adapter sync      # Write configs for all supported or selected AI tools
+npx iwsdk adapter status     # Check adapter state
+npx iwsdk adapter prune      # Remove IWSDK-managed MCP entries
+```
+
+Supported adapters: Claude Code, Cursor, OpenAI Codex, GitHub Copilot.
+
+---
+
+## 7. Reference System
+
+`@iwsdk/reference` is a workspace-local reference CLI/MCP server for semantic
+IWSDK search, backed by warmed corpus/model assets.
+
+### Setup
+
+```bash
+npx iwsdk reference warmup   # Download corpus archive + pinned model files into cache
+npx iwsdk reference status    # Check readiness
+```
+
+### Query Tools
+
+```bash
+# Semantic search
+npx iwsdk reference search --input-json '{"query":"how to create a grabbable object","limit":5}'
+
+# API reference
+npx iwsdk reference api --input-json '{"name":"World.create"}'
+
+# Relationship search
+npx iwsdk reference relationship --input-json '{"type":"extends","target":"System"}'
+
+# File content
+npx iwsdk reference file --input-json '{"file_path":"packages/core/src/ecs/world.ts","source":"iwsdk"}'
+
+# List all ECS components / systems
+npx iwsdk reference components --input-json '{}'
+npx iwsdk reference systems --input-json '{}'
+
+# Dependents and examples
+npx iwsdk reference dependents --input-json '{"api_name":"DistanceGrabbable"}'
+npx iwsdk reference examples --input-json '{"api_name":"DistanceGrabbable"}'
+
+# Inspect tool catalog
+npx iwsdk reference inspect
+npx iwsdk reference inspect --tool search
+```
+
+### Install Failure Handling
+
+Do not use `npm install --ignore-scripts` as the default workaround for
+`@iwsdk/reference`; the package bin expects built `dist` files. If installation
+fails, inspect the package-manager error and fix the underlying dependency,
+engine, or network/cache issue. In the current repo, the reference package
+declares its MCP and embedding dependencies and type-checks successfully.
+
+---
+
+## 8. Runtime Debugging & ECS CLI
+
+Runtime command groups (`xr`, `browser`, `scene`, `ecs`) require a running IWSDK
+runtime. `dev up` starts one; `status`, `dev`, `adapter`, `reference`, and
+`mcp inspect` commands can run without an active runtime unless noted.
+
+### Full CLI Tree
+
+```
+iwsdk status
+iwsdk dev      up | down | restart | logs | open | status
+iwsdk adapter  sync | status | prune
+iwsdk reference status | warmup | inspect | search | relationship |
+                api | file | components | systems | dependents | examples
+iwsdk mcp      stdio | inspect [--tool <mcpName>]
+iwsdk xr       status | enter | exit | get-transform | set-transform |
+               look-at | animate-to | set-input-mode | set-connected |
+               get-select-value | set-select-value | select |
+               get-gamepad-state | set-gamepad-state |
+               get-device-state | set-device-state
+iwsdk browser  screenshot | logs | reload
+iwsdk scene    hierarchy | transform
+iwsdk ecs      pause | resume | step | query | find | systems |
+               components | toggle-system | set-component | snapshot | diff
+```
+
+### Scene Inspection
+
+```bash
+npx iwsdk scene hierarchy
+npx iwsdk scene hierarchy --input-json '{"maxDepth":3}'
+npx iwsdk scene transform --input-json '{"uuid":"<uuid>"}'
+```
+
+### ECS Inspection
+
+```bash
+npx iwsdk ecs find --input-json '{"withComponents":["DistanceGrabbable"]}'
+npx iwsdk ecs query --input-json '{"entityIndex":3}'
+npx iwsdk ecs set-component --input-json '{"entityIndex":3,"componentId":"Transform","field":"position","value":[2,1,-1.8]}'
+```
+
+### ECS Frame Stepping & Snapshot Diffs
+
+Use these to verify game logic, physics behavior, or movement direction:
+
+```bash
+npx iwsdk ecs pause                                         # Freeze ECS (render continues)
+npx iwsdk ecs step --input-json '{"count":1}'               # Advance one frame
+npx iwsdk ecs resume                                         # Resume; first resumed delta is capped
+
+npx iwsdk ecs snapshot --input-json '{"label":"before"}'     # Save state
+# ... make a change or advance frames ...
+npx iwsdk ecs snapshot --input-json '{"label":"after"}'
+npx iwsdk ecs diff --input-json '{"from":"before","to":"after"}'  # Compare
+```
+
+Only the two most recent distinct snapshot labels are retained.
+
+### Browser Tools
+
+```bash
+npx iwsdk browser screenshot    # Writes a PNG and returns screenshotPath
+npx iwsdk browser logs           # App console logs
+npx iwsdk browser reload         # Reload page
+```
+
+---
+
+## 9. XR Emulation
+
+### Device Names (CRITICAL)
+
+| Device Name | Description |
+|-------------|-------------|
+| `"headset"` | HMD / viewer |
+| `"controller-right"` | Right controller |
+| `"controller-left"` | Left controller |
+| `"hand-right"` | Right hand |
+| `"hand-left"` | Left hand |
+
+Prefer these canonical IDs because CLI schemas and docs use them. Current IWER
+also normalizes common aliases such as `"right"`, `"right-controller"`,
+`"rightController"`, and `"controllers.right"`, but unrecognized IDs still fail.
+Allowed devices vary by command: transforms support headset/controllers/hands;
+select supports controllers/hands; gamepad commands support controllers only.
+
+### Common Commands
+
+```bash
+npx iwsdk xr enter
+npx iwsdk xr exit
+npx iwsdk xr status
+
+# Position devices
+npx iwsdk xr get-transform --input-json '{"device":"headset"}'
+npx iwsdk xr set-transform --input-json '{"device":"headset","position":{"x":0,"y":1.6,"z":-2}}'
+npx iwsdk xr look-at --input-json '{"device":"headset","target":{"x":0,"y":0.9,"z":0}}'
+npx iwsdk xr animate-to --input-json '{"device":"headset","position":{"x":0,"y":1.5,"z":0},"duration":0.5}'
+npx iwsdk xr set-input-mode --input-json '{"mode":"controller"}'
+npx iwsdk xr set-connected --input-json '{"device":"controller-right","connected":true}'
+
+# Controller input
+npx iwsdk xr select --input-json '{"device":"controller-right"}'
+npx iwsdk xr get-select-value --input-json '{"device":"controller-right"}'
+npx iwsdk xr set-select-value --input-json '{"device":"controller-right","value":1}'
+npx iwsdk xr get-gamepad-state --input-json '{"device":"controller-right"}'
+npx iwsdk xr set-gamepad-state --input-json '{"device":"controller-right","buttons":[{"index":0,"value":1}]}'
+```
+
+### `set-device-state` (Different Naming Convention)
+
+This command takes a top-level `state` object, not the flat `"device"` string
+used by transform/input commands. Omitting `state` resets device defaults.
+
+```bash
+npx iwsdk xr set-device-state --input-json '{
+  "state": {
+    "controllers": {
+      "right": {
+        "position": {"x":0.2, "y":1.1, "z":0.3},
+        "orientation": {"x":0, "y":0, "z":0, "w":1}
+      }
+    }
+  }
+}'
+```
+
+### Recovery: Unresponsive Runtime
+
+If runtime commands time out, check browser/runtime readiness, active XR session
+state, console logs, and whether the render loop is running:
+
+**To recover:**
+
+1. `npx iwsdk xr status`
+2. `npx iwsdk browser logs`
+3. `npx iwsdk browser reload`
+4. If transport/server state is bad: `npx iwsdk dev restart`
+5. Re-enter XR if needed: `npx iwsdk xr enter`
+
+Read-only XR methods are immediate and cannot create a queued action loop, but
+runtime validation is uneven. Still pass explicit `"device"` values.
+
+---
+
+## 10. Verification Workflow (IMPORTANT)
+
+For IWSDK app/example workspaces, verify behavior with the live runtime tools.
+Do not assume a code change is correct just because it compiles.
+
+### Verification checklist:
+
+1. **Start the dev server** — from an app/example workspace that defines
+   `dev:runtime`, run `npx iwsdk dev up`
+2. **Take a screenshot** — `npx iwsdk browser screenshot` — to confirm the
+   scene renders correctly.
+3. **Use ECS pause/step/snapshot** to inspect state frame-by-frame when
+   debugging movement, physics, or timing logic. ECS tools require IWSDK's
+   runtime debug bridge.
+4. **Check the generated app build matches the source** — after building,
+   verify the compiled JS contains the expected changes when the pattern
+   survives bundling/minification:
+   ```bash
+   npm run build
+   grep -R -- 'YOUR_PATTERN' dist/assets/*.js
+   ```
+5. **After deploying**, verify the live HTML references the newly built hashed
+   assets.
+
+### Common pitfall: deploying stale artifacts
+
+If you change source code, commit, then deploy `dist/` to `gh-pages` without
+rebuilding, the deployed JS can still contain the old code. Build immediately
+before publishing `dist/`, then verify the live site references the new hashed
+assets.
+
+---
+
+## 11. Bundled AI Skills
+
+The generated Claude config recipe bundles 7 Claude Code skill files at
+`packages/starter-assets/claude-injections/skills/`:
+
+| Skill | Purpose |
+|-------|---------|
+| `iwsdk-planner` | Project planning and architecture |
+| `iwsdk-grab` | Grab interaction implementation |
+| `iwsdk-ray` | Ray interaction implementation |
+| `iwsdk-ui` | Spatial UI implementation |
+| `iwsdk-debug` | Debugging workflows |
+| `iwsdk-physics` | Physics system implementation |
+| `iwsdk-depth-occlusion` | Depth sensing and occlusion for AR |
+
+---
+
+## 12. Production Build & Deployment
+
+### Build
+
+```bash
+npm run build
+```
+
+In generated apps, this runs a Vite build. The `dist/` folder is deployable as
+static files. It is not guaranteed to be fully offline/self-contained: some
+runtime assets, such as XR controller profile visuals, may still be fetched
+externally unless the app bundles them or provides a custom asset loader.
+
+### GitHub Pages Deployment (no Actions required)
+
+If your GitHub token lacks the `workflow` scope and you cannot push
+`.github/workflows/`, prefer the documented static deploy path:
+
+```bash
+npm run build
+npx gh-pages -d dist
+```
+
+If you need to avoid the `gh-pages` helper, push `dist/` directly to the
+`gh-pages` branch. Use an environment variable for the project path so the
+commands are copy-safe:
+
+```bash
+# From project root, after a successful build:
+PROJECT="$PWD"
+cd /tmp && rm -rf gh-pages-deploy && mkdir gh-pages-deploy && cd gh-pages-deploy
+git init && cp -R "$PROJECT/dist/." .
+git add -A && git commit -m "Deploy"
+git push --force "https://github.com/<owner>/<repo>.git" HEAD:gh-pages
+```
+
+Then enable GitHub Pages source `gh-pages` branch in repo settings. The starter
+template uses `base: './'`, which works for project pages; existing apps should
+verify their Vite `base` setting before deploying under a subpath.
+
+### Zip Delivery (alternative)
+
+```bash
+PROJECT_NAME=my-app
+(cd dist && zip -r "/tmp/${PROJECT_NAME}-dist.zip" .)
+```
+
+---
+
+## 13. Coordinate System & Conventions
+
+Standard Three.js / WebXR conventions apply:
+
+- **Right-handed** coordinate system.
+- **-Z is camera forward.** Cameras look along local -Z.
+- **+Y is up.**
+- The player origin starts at identity; with an unrotated camera, forward is -Z.
+- In browser-first mode, the camera starts at the configured position
+  (default: `[0, 1.7, 0]` looking toward -Z unless `render.camera` overrides it).
+
+For games with approach lanes (e.g. rhythm games):
+- For a lane aligned with camera forward (-Z), spawn far objects at more
+  negative Z values.
+- Move those objects toward +Z as they approach the player.
+- Put the hit zone near the player at a small negative Z (e.g. `z = -2`).
+
+---
+
+## 14. XR Controller Input (VR Games)
+
+For headset-targeted VR apps, XR controller or hand input should be first-class.
+Keyboard/mouse should be a browser fallback, not the only supported input path.
+
+Prefer the stateful XR input API over raw `Gamepad` array indexing:
+
+```typescript
+import { InputComponent } from '@iwsdk/core';
+
+const rightGamepad = world.input.xr.gamepads.right;
+const triggerDown = rightGamepad?.getButtonDown(InputComponent.Trigger);
+const squeezeHeld = rightGamepad?.getButtonPressed(InputComponent.Squeeze);
+const thumbstick = rightGamepad?.getAxesValues(InputComponent.Thumbstick);
+const aPressed = rightGamepad?.getButtonDown(InputComponent.A_Button);
+```
+
+Raw WebXR gamepad indices are profile-specific fallback knowledge; prefer
+`InputComponent` APIs in app code. Do not transfer raw profile indices directly
+to the runtime CLI: `iwsdk xr set-gamepad-state` uses its documented synthetic
+schema (`0=trigger`, `1=squeeze`, `2=thumbstick`, `3=A/X`, `4=B/Y`,
+`5=thumbrest`).
+
+### Dual-input pattern
+
+For games that should work in both browser and VR:
+
+```typescript
+// In your update loop, direct browser fallback:
+if (world.input.keyboard.getKeyDown('Space')) {
+  fire();
+}
+
+// For shared fire/select intent, register explicit keyboard and XR action
+// bindings, or use the built-in locomotion actions where applicable.
+```
+
+---
+
+## 15. Migration: 0.3.x → 0.4.x
+
+### Breaking Changes
+
+1. **`world.input` is now `InputManager`**, not `XRInputManager`.
+   Access XR input via `world.input.xr`.
+2. **`AssetManager.getGLTF()` returns clones by default.**
+   Scene graphs are cloned; geometries, materials, and animations remain shared.
+   Pass `{ shared: true }` for the old shared-instance behavior.
+3. **`--from <url>` is now `--canary [url]`** in `@iwsdk/create`.
+4. **`ai.tools` removed from vite plugin config.**
+   MCP adapter configs are project-level, managed via `iwsdk adapter sync`.
+
+### Deprecated (still working)
+
+```
+world.input.gamepads         → world.input.xr.gamepads
+world.input.multiPointers    → world.input.xr.multiPointers
+world.input.visualAdapters   → world.input.xr.visualAdapters
+world.input.isPrimary()      → world.input.xr.isPrimary()
+```
+
+### No Longer Needed
+
+- Manual SwiftShader patching — the managed Playwright browser auto-detects GPU
+  availability and supports `IWSDK_GPU=auto|gpu|swiftshader`.
+- Manual MCP config at runtime — project creation syncs adapters when
+  dependencies are installed and AI tools are selected; otherwise run
+  `iwsdk adapter sync`.
