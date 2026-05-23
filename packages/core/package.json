@@ -8,6 +8,29 @@
   "files": [
     "dist"
   ],
+  "sideEffects": [
+    "dist/index.js",
+    "dist/asset/**",
+    "dist/audio/**",
+    "dist/camera/**",
+    "dist/depth/**",
+    "dist/ecs/**",
+    "dist/environment/**",
+    "dist/environment-raycast/**",
+    "dist/grab/**",
+    "dist/init/**",
+    "dist/input/**",
+    "dist/layers/**",
+    "dist/level/**",
+    "dist/locomotion/**",
+    "dist/mcp/**",
+    "dist/runtime/**",
+    "dist/scene-understanding/**",
+    "dist/transform/**",
+    "dist/ui/**",
+    "dist/vendor/**",
+    "dist/visibility/**"
+  ],
   "scripts": {
     "prebuild": "node -p \"'export const VERSION = ' + JSON.stringify(require('./package.json').version) + ';'\" > src/version.ts",
     "build": "rollup -c",

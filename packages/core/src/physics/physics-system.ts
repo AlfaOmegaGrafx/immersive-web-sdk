@@ -5,7 +5,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import {
+// All symbols from `@babylonjs/havok` are type-only here. The runtime engine
+// (which ships ~2 MB of WASM) is loaded lazily via `await import(...)` later
+// in `init()`, and runtime access to enums like `MotionType` is done via the
+// loaded instance (e.g. `this.havok.MotionType.STATIC`). Keeping these as
+// `import type` ensures `@babylonjs/havok` stays out of the static module
+// graph when consumers don't enable `features.physics`, so the WASM and JS
+// engine chunks aren't bundled into non-physics projects.
+import type {
   HavokPhysicsWithBindings,
   HP_ShapeId,
   HP_WorldId,

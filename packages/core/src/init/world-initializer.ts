@@ -47,12 +47,10 @@ import {
   TurningMethod,
 } from '../locomotion/index.js';
 import { MCPRuntime } from '../mcp/index.js';
-import {
-  PhysicsBody,
-  PhysicsManipulation,
-  PhysicsShape,
-  PhysicsSystem,
-} from '../physics/index.js';
+// The physics module pulls in `@babylonjs/havok` (~2 MB WASM + engine JS) at
+// the static-graph level. Load it lazily in `registerFeatureSystems` only
+// when `features.physics` is enabled so non-physics projects don't pay the
+// bundle-size tax.
 import {
   Clock,
   PerspectiveCamera,
@@ -200,7 +198,7 @@ type CameraPoseOptions = NonNullable<
  * @remarks
  * This function powers {@link World.create}. Prefer using that static helper.
  */
-export function initializeWorld(
+export async function initializeWorld(
   container: HTMLDivElement,
   options: WorldOptions = {},
 ): Promise<World> {
@@ -234,8 +232,10 @@ export function initializeWorld(
   // Register additional systems (UI + Audio on by default)
   registerAdditionalSystems(world);
 
-  // Register input and feature systems with explicit priorities
-  registerFeatureSystems(world, config);
+  // Register input and feature systems with explicit priorities.
+  // Awaited because the physics branch dynamically imports its module so
+  // `@babylonjs/havok` stays out of the static graph for non-physics builds.
+  await registerFeatureSystems(world, config);
 
   // Setup render loop
   setupRenderLoop(world, renderer);
@@ -594,7 +594,7 @@ function registerAdditionalSystems(world: World) {
   world.registerComponent(AudioSource).registerSystem(AudioSystem);
 }
 
-function registerFeatureSystems(
+async function registerFeatureSystems(
   world: World,
   config: ReturnType<typeof extractConfiguration>,
 ) {
@@ -673,8 +673,12 @@ function registerFeatureSystems(
     world.registerSystem(GrabSystem, { priority: -3, configData: grabOpts });
   }
 
-  // Physics runs after Grab so it can respect Pressed overrides
+  // Physics runs after Grab so it can respect Pressed overrides.
+  // Dynamically imported so the physics module (and its ~2 MB Havok WASM)
+  // stays out of the static module graph for non-physics projects.
   if (physicsEnabled) {
+    const { PhysicsBody, PhysicsManipulation, PhysicsShape, PhysicsSystem } =
+      await import('../physics/index.js');
     world
       .registerComponent(PhysicsBody)
       .registerComponent(PhysicsShape)
