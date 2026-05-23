@@ -154,7 +154,7 @@ export abstract class XRInputVisualAdapter {
     camera: PerspectiveCamera,
     assetLoader: XRAssetLoader,
     profileAssetPath?: string,
-  ): Promise<T> {
+  ): Promise<T | undefined> {
     const profileId = visualClass.assetProfileId ?? inputSource.profiles[0];
     const assetPath =
       profileAssetPath ??
@@ -166,14 +166,18 @@ export abstract class XRInputVisualAdapter {
     if (this.visualCache.has(assetKey)) {
       visual = this.visualCache.get(assetKey) as T;
     } else {
-      const gltf = await assetLoader.loadGLTF(assetPath).catch(() => ({
-        scene: new Group(),
-      }));
+      const gltf = await assetLoader.loadGLTF(assetPath).catch(() => null);
+      // Visual subclasses dereference asset nodes (SkinnedMesh, wrist, joints)
+      // in their constructor and init(), so an empty model crashes them. Bail
+      // before construction; caller's `if (visual && ...)` skips the assignment.
+      if (!gltf || gltf.scene.children.length === 0) {
+        console.warn(
+          `[xr-input] Failed to load visual asset ${assetPath}; input will be tracked without a visual.`,
+        );
+        return undefined;
+      }
       visual = new visualClass(scene, camera, gltf.scene, layout);
       visual.init();
-      if (visual.model.children.length === 0) {
-        visual.model.visible = false;
-      }
       this.visualCache.set(assetKey, visual);
     }
     visual.connect(inputSource, enabled);
