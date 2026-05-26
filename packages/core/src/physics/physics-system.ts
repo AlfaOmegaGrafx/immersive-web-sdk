@@ -181,7 +181,7 @@ export class PhysicsSystem extends createSystem(
           const position = entity.object3D.position;
           const quaternion = entity.object3D.quaternion;
 
-          if (entity.hasComponent(Grabbed)) {
+          if (Grabbed.bitmask && entity.hasComponent(Grabbed)) {
             this.havok.HP_Body_SetTargetQTransform(
               [BigInt(engineBody)],
               [
