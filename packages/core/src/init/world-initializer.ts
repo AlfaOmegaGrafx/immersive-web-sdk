@@ -10,7 +10,7 @@ import { signal } from '@preact/signals-core';
 import { AssetManager, AssetManifest } from '../asset/index.js';
 import { AudioSource, AudioSystem } from '../audio/index.js';
 import { CameraSource, CameraSystem } from '../camera/index.js';
-import { World, VisibilityState } from '../ecs/index.js';
+import { World, VisibilityState } from '../ecs/world.js';
 import {
   DomeTexture,
   DomeGradient,

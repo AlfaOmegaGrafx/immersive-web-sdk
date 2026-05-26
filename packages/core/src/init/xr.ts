@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import type { World } from '../ecs/index.js';
+import type { World } from '../ecs/world.js';
 import { attachBrowserCameraRestore } from './browser-camera.js';
 
 /** WebXR session modes supported by IWSDK. @category Runtime */

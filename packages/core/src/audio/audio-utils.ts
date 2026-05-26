@@ -5,8 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Entity } from '../ecs/index.js';
-import type { World } from '../ecs/index.js';
+import { Entity } from '../ecs/entity.js';
+import type { World } from '../ecs/world.js';
 import { AudioSource as AudioComponent } from './audio.js';
 
 /** Utility helpers to control {@link AudioSource} without touching Three audio.

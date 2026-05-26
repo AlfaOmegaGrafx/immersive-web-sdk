@@ -7,8 +7,15 @@
 
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { AssetManager, CacheManager } from '../asset/index.js';
-import { Entity, createSystem } from '../ecs/index.js';
-import { LevelRoot } from '../level/index.js';
+import { Entity } from '../ecs/entity.js';
+import { createSystem } from '../ecs/system.js';
+// Import directly from the subfile — not the `../level/index.js` barrel — to
+// avoid a value-level import cycle: level/index.js re-exports level-system.ts,
+// which imports the environment barrel, which re-exports environment-system.ts
+// (currently being evaluated). The bundler resolves this cycle by emitting
+// EnvironmentSystem before dome-texture/dome-gradient/ibl-* are defined,
+// leaving the required[] arrays holding `undefined.bitmask` crashes.
+import { LevelRoot } from '../level/level-root.js';
 import {
   BackSide,
   Color,

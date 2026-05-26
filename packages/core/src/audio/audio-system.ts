@@ -7,7 +7,14 @@
 
 import { PositionalAudio, AudioListener, Audio as AmbientAudio } from 'three';
 import { AssetManager } from '../asset/index.js';
-import { Types, Entity, createSystem } from '../ecs/index.js';
+// Import directly from submodules — not the `../ecs/index.js` barrel — to
+// avoid a value-level import cycle: ecs/index.js re-exports ecs/world.js,
+// which (via its transitive deps) loops back to audio/audio-system.js while
+// it is still being evaluated. That would leave the AudioSource reference
+// captured in `audioEntities.required` as `undefined` at class-body eval time.
+import { Types } from '../ecs/component.js';
+import { Entity } from '../ecs/entity.js';
+import { createSystem } from '../ecs/system.js';
 import { AudioInstance, AudioPool } from './audio-pool.js';
 import { AudioSource, InstanceStealPolicy, PlaybackMode } from './audio.js';
 

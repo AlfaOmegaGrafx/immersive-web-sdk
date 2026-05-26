@@ -5,7 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { createSystem, Entity, Types } from '../ecs/index.js';
+import { createSystem } from '../ecs/system.js';
+import { Entity } from '../ecs/entity.js';
+import { Types } from '../ecs/component.js';
 import {
   BoxGeometry,
   BufferAttribute,

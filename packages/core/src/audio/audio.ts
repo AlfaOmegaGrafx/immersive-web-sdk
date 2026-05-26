@@ -5,7 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Types, createComponent } from '../ecs/index.js';
+// See audio-system.ts for rationale — import from the subfile, not the
+// `../ecs/index.js` barrel, to keep this module free of the world.js cycle.
+import { Types, createComponent } from '../ecs/component.js';
 
 /**
  * Playback behavior when a new play is requested.

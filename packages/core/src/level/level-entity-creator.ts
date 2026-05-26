@@ -6,8 +6,9 @@
  */
 
 import { AnySchema, Component, ComponentRegistry } from 'elics';
-import { Types, Entity } from '../ecs/index.js';
-import type { World } from '../ecs/index.js';
+import { Types } from '../ecs/component.js';
+import { Entity } from '../ecs/entity.js';
+import type { World } from '../ecs/world.js';
 import { Object3D } from '../runtime/index.js';
 import { PanelUI } from '../ui/index.js';
 

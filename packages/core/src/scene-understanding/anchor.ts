@@ -5,8 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Types, createComponent } from '../ecs/index.js';
-
+import { Types, createComponent } from '../ecs/component.js';
 /**
  * Component for anchoring entities to stable real‑world positions in AR/VR.
  *

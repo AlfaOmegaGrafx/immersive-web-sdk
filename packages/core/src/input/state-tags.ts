@@ -5,8 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { createComponent } from '../ecs/index.js';
-
+import { createComponent } from '../ecs/component.js';
 /**
  * Marks an entity as eligible for ray-based pointer interaction.
  *

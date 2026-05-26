@@ -5,8 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { createComponent } from '../ecs/index.js';
-
+import { createComponent } from '../ecs/component.js';
 /**
  * Transient state tag indicating an entity is currently being grabbed.
  *

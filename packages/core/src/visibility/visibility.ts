@@ -5,8 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Types, createComponent, Entity, createSystem } from '../ecs/index.js';
-
+import { Types, createComponent } from '../ecs/component.js';
+import { Entity } from '../ecs/entity.js';
+import { createSystem } from '../ecs/system.js';
 export const Visibility = createComponent(
   'Visibility',
   {

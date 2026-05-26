@@ -7,7 +7,8 @@
 
 import { GLXF, GLXFLoader } from '@iwsdk/glxf';
 import { AssetManager } from '../asset/index.js';
-import type { Entity, World } from '../ecs/index.js';
+import type { Entity } from '../ecs/entity.js';
+import type { World } from '../ecs/world.js';
 import { EntityCreator } from './level-entity-creator.js';
 
 /**

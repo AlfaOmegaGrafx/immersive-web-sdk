@@ -6,7 +6,7 @@
  */
 
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import type { World } from '../ecs/index.js';
+import type { World } from '../ecs/world.js';
 import { LoadingManager, Texture, WebGLRenderer } from '../runtime/index.js';
 import { CacheManager } from './cache-manager.js';
 import { AudioAssetLoader } from './loaders/audio-loader.js';

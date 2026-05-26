@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Entity } from '../ecs/index.js';
+import { Entity } from '../ecs/entity.js';
 import { CameraSource } from './camera-source.js';
 import {
   CameraFacing,

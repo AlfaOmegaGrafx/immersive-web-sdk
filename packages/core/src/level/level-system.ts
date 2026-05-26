@@ -6,8 +6,9 @@
  */
 
 import { signal } from '@preact/signals-core';
-import { Types, createSystem } from '../ecs/index.js';
-import type { Entity } from '../ecs/index.js';
+import { Types } from '../ecs/component.js';
+import { createSystem } from '../ecs/system.js';
+import type { Entity } from '../ecs/entity.js';
 import {
   DomeGradient,
   DomeTexture,

@@ -5,7 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { createComponent, createSystem, Entity, Types } from '../ecs/index.js';
+import { createComponent, Types } from '../ecs/component.js';
+import { createSystem } from '../ecs/system.js';
+import { Entity } from '../ecs/entity.js';
 import {
   AddEquation,
   BackSide,

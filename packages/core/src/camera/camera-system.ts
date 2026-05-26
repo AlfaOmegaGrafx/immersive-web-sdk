@@ -5,7 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { createSystem, Entity, VisibilityState } from '../ecs/index.js';
+import { createSystem } from '../ecs/system.js';
+import { Entity } from '../ecs/entity.js';
+import { VisibilityState } from '../ecs/world.js';
 import { LinearFilter, VideoTexture } from '../runtime/three.js';
 import { CameraSource } from './camera-source.js';
 import { CameraUtils } from './camera-utils.js';

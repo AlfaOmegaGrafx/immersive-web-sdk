@@ -5,8 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Types, createComponent } from '../ecs/index.js';
-
+import { Types, createComponent } from '../ecs/component.js';
 /**
  * Component representing detected real‑world 3D mesh geometry in AR/VR environments. This component
  * should be attached to entities by the SceneUnderstandingSystem and be queried by custom systems.

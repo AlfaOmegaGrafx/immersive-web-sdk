@@ -6,7 +6,10 @@
  */
 
 import type { PointerEvent, PointerEventsMap } from '@pmndrs/pointer-events';
-import { createSystem, Entity, Types, VisibilityState } from '../ecs/index.js';
+import { createSystem } from '../ecs/system.js';
+import { Entity } from '../ecs/entity.js';
+import { Types } from '../ecs/component.js';
+import { VisibilityState } from '../ecs/world.js';
 import { DistanceGrabbable } from '../grab/distance-grabbable.js';
 import { OneHandGrabbable } from '../grab/one-hand-grabbable.js';
 import { TwoHandsGrabbable } from '../grab/two-hands-grabbable.js';

@@ -6,7 +6,7 @@
  */
 
 import { HandleOptions, HandleStore } from '@pmndrs/handle';
-import { Types, createComponent } from '../ecs/index.js';
+import { Types, createComponent } from '../ecs/component.js';
 import { Object3D, Quaternion, Vector3 } from '../runtime/index.js';
 
 export const Handle = createComponent(

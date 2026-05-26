@@ -5,8 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Types, createComponent } from '../ecs/index.js';
-
+import { Types, createComponent } from '../ecs/component.js';
 /**
  * XRCylinderLayer - Component for WebXR cylinder composition layers.
  *

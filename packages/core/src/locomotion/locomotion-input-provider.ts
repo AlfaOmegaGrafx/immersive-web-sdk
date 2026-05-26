@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import type { World } from '../ecs/index.js';
+import type { World } from '../ecs/world.js';
 import { InputActions } from '../input/input-actions.js';
 import { Quaternion, Vector2, Vector3 } from '../runtime/index.js';
 

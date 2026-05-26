@@ -7,7 +7,8 @@
 
 import { Locomotor } from '@iwsdk/locomotor';
 import { lerp } from 'three/src/math/MathUtils.js';
-import { Types, createSystem } from '../ecs/index.js';
+import { Types } from '../ecs/component.js';
+import { createSystem } from '../ecs/system.js';
 import {
   BackSide,
   Color,

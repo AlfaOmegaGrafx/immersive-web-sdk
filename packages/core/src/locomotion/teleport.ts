@@ -8,7 +8,8 @@
 import { Locomotor, sampleParabolicCurve } from '@iwsdk/locomotor';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
-import { Types, createSystem } from '../ecs/index.js';
+import { Types } from '../ecs/component.js';
+import { createSystem } from '../ecs/system.js';
 import {
   Color,
   Mesh,

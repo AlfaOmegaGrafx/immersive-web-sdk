@@ -5,8 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Types, createComponent } from '../ecs/index.js';
-
+import { Types, createComponent } from '../ecs/component.js';
 /** Occlusion shader mode for {@link DepthOccludable}. @category Depth Sensing */
 export const OcclusionShadersMode = {
   /** Soft occlusion with 13-tap blur sampling for smooth edges. */

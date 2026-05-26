@@ -5,13 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import {
-  Types,
-  createComponent,
-  Entity,
-  NullEntity,
-  createSystem,
-} from '../ecs/index.js';
+import { Types, createComponent } from '../ecs/component.js';
+import { Entity, NullEntity } from '../ecs/entity.js';
+import { createSystem } from '../ecs/system.js';
 import { LevelTag } from '../level/index.js';
 import { Quaternion, Vector3, Euler } from '../runtime/three.js';
 import { SyncedEuler } from './synced-euler.js';

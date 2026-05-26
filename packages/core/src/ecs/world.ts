@@ -11,14 +11,22 @@ import { Signal, signal } from '@preact/signals-core';
 import { AnyComponent, World as ElicsWorld } from 'elics';
 import { AssetManager } from '../asset/index.js';
 // Environment is driven by components/systems; no world helpers
-import {
-  WorldOptions,
-  initializeWorld,
-  XROptions,
-  launchXR,
-} from '../init/index.js';
+// NOTE: import `launchXR` and types directly from submodules — not the
+// `../init/index.js` barrel — so loading this file does not pull in
+// `init/world-initializer.js`. That would create a value-level cycle with
+// audio-system.ts (and other systems that import the ecs barrel), causing
+// the bundler to emit System classes before their referenced Component
+// constants, producing `undefined.bitmask` crashes at QueryManager.registerQuery.
+// `initializeWorld` is loaded lazily inside `World.create` for the same reason.
+import type { WorldOptions } from '../init/world-initializer.js';
+import { launchXR } from '../init/xr.js';
+import type { XROptions } from '../init/xr.js';
 import type { InputManager } from '../input/index.js';
-import { LevelTag } from '../level/index.js';
+// Import LevelTag from its leaf module — not '../level/index.js' — so that
+// loading ecs/world.ts does not transitively pull in level-system.ts (which
+// would re-enter '../ecs/index.js' and form a cycle, leading to TDZ
+// undefined.bitmask crashes for any component captured in System.queries).
+import { LevelTag } from '../level/level-tag.js';
 import type { MCPRuntime } from '../mcp/index.js';
 import type { Object3DEventMap } from '../runtime/index.js';
 import {
@@ -28,7 +36,10 @@ import {
   Scene,
   WebGLRenderer,
 } from '../runtime/index.js';
-import { Transform } from '../transform/index.js';
+// See note above on LevelTag — import Transform directly from its leaf
+// module to avoid cycling back through '../ecs/index.js' via the transform
+// barrel.
+import { Transform } from '../transform/transform.js';
 import { Entity } from './entity.js';
 
 export enum VisibilityState {
@@ -264,10 +275,11 @@ export class World extends ElicsWorld {
    * - If {@link WorldOptions.level} is provided, the LevelSystem will load it after assets are preloaded.
    * @see /getting-started/01-hello-xr
    */
-  static create(
+  static async create(
     container: HTMLDivElement,
     options?: WorldOptions,
   ): Promise<World> {
+    const { initializeWorld } = await import('../init/world-initializer.js');
     return initializeWorld(container, options);
   }
 }

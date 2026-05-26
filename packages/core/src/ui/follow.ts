@@ -5,7 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { Types, createComponent, createSystem } from '../ecs/index.js';
+import { Types, createComponent } from '../ecs/component.js';
+import { createSystem } from '../ecs/system.js';
 import {
   Euler,
   MathUtils,
